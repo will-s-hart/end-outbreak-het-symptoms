@@ -1,5 +1,6 @@
 import numpy as np
 import pymc as pm
+import scipy.linalg
 
 from endoutbreakhet.utils import lognormal_params_from_median_percentile_2_5
 
@@ -29,17 +30,15 @@ def fit_model(
     thin=1,
     **kwargs_sample,
 ):
-    priors = priors or {}
-
     pm_model = _build_pymc_model(
         model_name=model_name,
         incidence_vec=incidence_vec,
         switch_day=switch_day,
         delay_distributions=delay_distributions,
-        priors=priors,
+        priors=DEFAULT_PRIORS | (priors or {}),
     )
 
-    with pm_model as model:
+    with pm_model:
         if step is not None:
             kwargs_sample["step"] = step()
 
@@ -53,327 +52,277 @@ def fit_model(
 
 
 def _build_pymc_model(
-    model_name, incidence_vec, switch_day, delay_distributions=None, priors=None
+    model_name, incidence_vec, switch_day, delay_distributions, priors
 ):
-    if model_name == "sse":
-        return _build_sse_model(
-            incidence_vec=incidence_vec,
-            switch_day=switch_day,
-            gen_time_dist_vec=delay_distributions["gen_time"],
-            priors=priors,
-        )
-    elif model_name == "ssi":
-        return _build_ssi_model(
-            incidence_vec=incidence_vec,
-            switch_day=switch_day,
-            gen_time_dist_vec=delay_distributions["gen_time"],
-            priors=priors,
-        )
-    elif model_name == "dlo":
-        return _build_dlo_model(
-            incidence_vec=incidence_vec,
-            switch_day=switch_day,
-            gen_time_dist_vec=delay_distributions["gen_time"],
-            priors=priors,
-        )
-    elif model_name == "sse_so":
-        return _build_sse_so_model(
-            incidence_vec=incidence_vec,
-            switch_day=switch_day,
-            tost_dist_vec=delay_distributions["tost"],
-            inc_period_dist_vec=delay_distributions["inc_period"],
-            priors=priors,
-        )
-    elif model_name == "ssi_so":
-        return _build_ssi_so_model(
-            incidence_vec=incidence_vec,
-            switch_day=switch_day,
-            tost_dist_vec=delay_distributions["tost"],
-            inc_period_dist_vec=delay_distributions["inc_period"],
-            priors=priors,
-        )
-    else:
+    builders = {
+        "poisson": _build_poisson_model,
+        "sse": _build_sse_model,
+        "ssi": _build_ssi_model,
+        "dlo": _build_dlo_model,
+        "poisson_so": _build_poisson_so_model,
+        "sse_so": _build_sse_so_model,
+        "ssi_so": _build_ssi_so_model,
+    }
+    if model_name not in builders:
         raise ValueError(f"Unknown model name: {model_name}")
+    return builders[model_name](
+        incidence_vec=incidence_vec,
+        switch_day=switch_day,
+        delay_distributions=delay_distributions,
+        priors=priors,
+    )
 
 
-def _build_sse_model(incidence_vec, switch_day, gen_time_dist_vec=None, priors=None):
+def _build_poisson_model(incidence_vec, switch_day, delay_distributions, priors):
     n_days = len(incidence_vec)
-    gen_time_dist_vec = np.concatenate([
-        gen_time_dist_vec,
-        np.zeros(n_days - 1 - len(gen_time_dist_vec)),
-    ])
-
-    incidence_vec_local = np.zeros(n_days)
-    incidence_vec_local[1:] = incidence_vec[1:]
-
-    foi_vec = np.zeros(n_days)
-    for t in range(1, n_days):
-        foi_vec[t] = np.sum(incidence_vec[:t][::-1] * gen_time_dist_vec[:t])
-
-    nonzero_foi_idx = foi_vec > 0
-    if np.any(incidence_vec_local[~nonzero_foi_idx]):
-        raise ValueError(
-            "Local incidence cannot be greater than zero when force of infection is 0."
-        )
+    gen_time_matrix = _delay_matrix(
+        delay_distributions["gen_time"], n_days, first_lag=1
+    )
+    foi_vec = gen_time_matrix @ incidence_vec
+    likelihood_idx = _get_likelihood_idx(incidence_vec, foi_vec)
 
     with pm.Model() as model:
-        rep_no_vec, dispersion = _build_rep_no_vec_dispersion(
+        rep_no_vec = _build_rep_no_vec(
             priors=priors, switch_day=switch_day, n_days=n_days
         )
+
+        expected_incidence_local = rep_no_vec * foi_vec
+
+        pm.Poisson(
+            "likelihood",
+            mu=expected_incidence_local[likelihood_idx],
+            observed=incidence_vec[likelihood_idx],
+        )
+    return model
+
+
+def _build_sse_model(incidence_vec, switch_day, delay_distributions, priors):
+    n_days = len(incidence_vec)
+    gen_time_matrix = _delay_matrix(
+        delay_distributions["gen_time"], n_days, first_lag=1
+    )
+    foi_vec = gen_time_matrix @ incidence_vec
+    likelihood_idx = _get_likelihood_idx(incidence_vec, foi_vec)
+
+    with pm.Model() as model:
+        rep_no_vec = _build_rep_no_vec(
+            priors=priors, switch_day=switch_day, n_days=n_days
+        )
+        dispersion = _prior_rv("dispersion", priors)
 
         expected_incidence_local = rep_no_vec * foi_vec
 
         pm.NegativeBinomial(
             "likelihood",
-            alpha=dispersion * foi_vec[nonzero_foi_idx],
-            mu=expected_incidence_local[nonzero_foi_idx],
-            observed=incidence_vec_local[nonzero_foi_idx],
+            alpha=dispersion * foi_vec[likelihood_idx],
+            mu=expected_incidence_local[likelihood_idx],
+            observed=incidence_vec[likelihood_idx],
         )
     return model
 
 
-def _build_ssi_model(incidence_vec, switch_day, gen_time_dist_vec=None, priors=None):
+def _build_ssi_model(incidence_vec, switch_day, delay_distributions, priors):
     n_days = len(incidence_vec)
-    gen_time_dist_vec = np.concatenate([
-        gen_time_dist_vec,
-        np.zeros(n_days - 1 - len(gen_time_dist_vec)),
-    ])
-
+    gen_time_matrix = _delay_matrix(
+        delay_distributions["gen_time"], n_days, first_lag=1
+    )
+    likelihood_idx = _get_likelihood_idx(incidence_vec, gen_time_matrix @ incidence_vec)
     nonzero_incidence_idx = incidence_vec > 0
-    n_case_days = int(np.sum(nonzero_incidence_idx))
-    incidence_vec_local = np.zeros(n_days)
-    incidence_vec_local[1:] = incidence_vec[1:]
-
-    conv_matrix = np.zeros((n_days, n_days))
-    for t in range(1, n_days):
-        conv_matrix[t, :t] = gen_time_dist_vec[:t][::-1]
-
-    foi_expected_vec = np.dot(conv_matrix, incidence_vec)
-    nonzero_foi_idx = foi_expected_vec > 0
-    if np.any(incidence_vec_local[~nonzero_foi_idx]):
-        raise ValueError(
-            "Local incidence cannot be greater than zero when force of infection is 0."
-        )
 
     with pm.Model() as model:
-        rep_no_vec, dispersion = _build_rep_no_vec_dispersion(
+        rep_no_vec = _build_rep_no_vec(
             priors=priors, switch_day=switch_day, n_days=n_days
         )
+        dispersion = _prior_rv("dispersion", priors)
 
-        # Inverse gamma transformation prevents NUTS sampling but improves efficiency
-        u = pm.Uniform("u", 0, 1, shape=n_case_days)
-        scaled_incidence_case_days = pm.Deterministic(
+        scaled_incidence_case_days = _gamma_via_uniform(
             "scaled_incidence_case_days",
-            pm.icdf(
-                pm.Gamma.dist(
-                    alpha=dispersion * (incidence_vec[nonzero_incidence_idx]),
-                    beta=dispersion,
-                    shape=n_case_days,
-                ),
-                u,
-            ),
+            mean_vec=incidence_vec[nonzero_incidence_idx],
+            dispersion=dispersion,
         )
-
         foi_vec = pm.math.dot(
-            conv_matrix[:, nonzero_incidence_idx], scaled_incidence_case_days
+            gen_time_matrix[:, nonzero_incidence_idx], scaled_incidence_case_days
         )
         expected_incidence_local = rep_no_vec * foi_vec
 
         pm.Poisson(
             "likelihood",
-            mu=expected_incidence_local[nonzero_foi_idx],
-            observed=incidence_vec_local[nonzero_foi_idx],
+            mu=expected_incidence_local[likelihood_idx],
+            observed=incidence_vec[likelihood_idx],
         )
     return model
 
 
-def _build_dlo_model(incidence_vec, switch_day, gen_time_dist_vec=None, priors=None):
+def _build_dlo_model(incidence_vec, switch_day, delay_distributions, priors):
     n_days = len(incidence_vec)
-    gen_time_dist_vec = np.concatenate([
-        gen_time_dist_vec,
-        np.zeros(n_days - 1 - len(gen_time_dist_vec)),
-    ])
-
-    incidence_vec_local = np.zeros(n_days)
-    incidence_vec_local[1:] = incidence_vec[1:]
-
-    foi_vec = np.zeros(n_days)
-    for t in range(1, n_days):
-        foi_vec[t] = np.sum(incidence_vec[:t][::-1] * gen_time_dist_vec[:t])
-
-    nonzero_foi_idx = foi_vec > 0
-    if np.any(incidence_vec_local[~nonzero_foi_idx]):
-        raise ValueError(
-            "Local incidence cannot be greater than zero when force of infection is 0."
-        )
+    gen_time_matrix = _delay_matrix(
+        delay_distributions["gen_time"], n_days, first_lag=1
+    )
+    foi_vec = gen_time_matrix @ incidence_vec
+    likelihood_idx = _get_likelihood_idx(incidence_vec, foi_vec)
 
     with pm.Model() as model:
-        rep_no_vec, dispersion = _build_rep_no_vec_dispersion(
+        rep_no_vec = _build_rep_no_vec(
             priors=priors, switch_day=switch_day, n_days=n_days
         )
+        dispersion = _prior_rv("dispersion", priors)
 
         expected_incidence_local = rep_no_vec * foi_vec
 
         pm.NegativeBinomial(
             "likelihood",
             alpha=dispersion,
-            mu=expected_incidence_local[nonzero_foi_idx],
-            observed=incidence_vec_local[nonzero_foi_idx],
+            mu=expected_incidence_local[likelihood_idx],
+            observed=incidence_vec[likelihood_idx],
         )
     return model
 
 
-def _build_sse_so_model(
-    incidence_vec, switch_day, tost_dist_vec=None, inc_period_dist_vec=None, priors=None
-):
+def _build_poisson_so_model(incidence_vec, switch_day, delay_distributions, priors):
     n_days = len(incidence_vec)
-    tost_dist_vec = np.concatenate([
-        tost_dist_vec,
-        np.zeros(n_days - len(tost_dist_vec)),
-    ])
-    inc_period_dist_vec = np.concatenate([
-        inc_period_dist_vec,
-        np.zeros(n_days - 1 - len(inc_period_dist_vec)),
-    ])
-
-    incidence_vec_local = np.zeros(n_days)
-    incidence_vec_local[1:] = incidence_vec[1:]
-
-    foi_vec = np.zeros(n_days)
-    for t in range(n_days):
-        foi_vec[t] = np.sum(incidence_vec[: (t + 1)][::-1] * tost_dist_vec[: (t + 1)])
-    nonzero_foi_idx = foi_vec > 0
-
-    conv_matrix = np.zeros((n_days, n_days))
-    for t in range(1, n_days):
-        conv_matrix[t, :t] = inc_period_dist_vec[:t][::-1]
-
-    nonzero_fod_idx = np.dot(conv_matrix, foi_vec) > 0
-    if np.any(incidence_vec_local[~nonzero_fod_idx]):
-        raise ValueError(
-            "Local incidence cannot be greater than zero when force of disease is 0."
-        )
+    tost_matrix = _delay_matrix(delay_distributions["tost"], n_days, first_lag=0)
+    inc_period_matrix = _delay_matrix(
+        delay_distributions["inc_period"], n_days, first_lag=1
+    )
+    foi_vec = tost_matrix @ incidence_vec
+    likelihood_idx = _get_likelihood_idx(incidence_vec, inc_period_matrix @ foi_vec)
 
     with pm.Model() as model:
-        rep_no_vec, dispersion = _build_rep_no_vec_dispersion(
+        rep_no_vec = _build_rep_no_vec(
             priors=priors, switch_day=switch_day, n_days=n_days
         )
 
-        u = pm.Uniform("u", 0, 1, shape=int(np.sum(nonzero_foi_idx)))
-        foi_scaled_nonzero_days = pm.Deterministic(
-            "foi_scaled_nonzero_days",
-            pm.icdf(
-                pm.Gamma.dist(
-                    alpha=dispersion * foi_vec[nonzero_foi_idx],
-                    beta=dispersion,
-                    shape=int(np.sum(nonzero_foi_idx)),
-                ),
-                u,
-            ),
-        )
+        expected_incidence_local = pm.math.dot(inc_period_matrix, rep_no_vec * foi_vec)
 
+        pm.Poisson(
+            "likelihood",
+            mu=expected_incidence_local[likelihood_idx],
+            observed=incidence_vec[likelihood_idx],
+        )
+    return model
+
+
+def _build_sse_so_model(incidence_vec, switch_day, delay_distributions, priors):
+    n_days = len(incidence_vec)
+    tost_matrix = _delay_matrix(delay_distributions["tost"], n_days, first_lag=0)
+    inc_period_matrix = _delay_matrix(
+        delay_distributions["inc_period"], n_days, first_lag=1
+    )
+    foi_vec = tost_matrix @ incidence_vec
+    nonzero_foi_idx = foi_vec > 0
+    likelihood_idx = _get_likelihood_idx(incidence_vec, inc_period_matrix @ foi_vec)
+
+    with pm.Model() as model:
+        rep_no_vec = _build_rep_no_vec(
+            priors=priors, switch_day=switch_day, n_days=n_days
+        )
+        dispersion = _prior_rv("dispersion", priors)
+
+        foi_scaled_nonzero_days = _gamma_via_uniform(
+            "foi_scaled_nonzero_days",
+            mean_vec=foi_vec[nonzero_foi_idx],
+            dispersion=dispersion,
+        )
         expected_incidence_local = pm.math.dot(
-            conv_matrix[:, nonzero_foi_idx],
+            inc_period_matrix[:, nonzero_foi_idx],
             foi_scaled_nonzero_days * rep_no_vec[nonzero_foi_idx],
         )
 
         pm.Poisson(
             "likelihood",
-            mu=expected_incidence_local[nonzero_fod_idx],
-            observed=incidence_vec_local[nonzero_fod_idx],
+            mu=expected_incidence_local[likelihood_idx],
+            observed=incidence_vec[likelihood_idx],
         )
     return model
 
 
-def _build_ssi_so_model(
-    incidence_vec,
-    switch_day,
-    tost_dist_vec=None,
-    inc_period_dist_vec=None,
-    priors=None,
-):
-    priors = priors or {}
+def _build_ssi_so_model(incidence_vec, switch_day, delay_distributions, priors):
     n_days = len(incidence_vec)
-    tost_dist_vec = np.concatenate([
-        tost_dist_vec,
-        np.zeros(n_days - len(tost_dist_vec)),
-    ])
-    inc_period_dist_vec = np.concatenate([
-        inc_period_dist_vec,
-        np.zeros(n_days - 1 - len(inc_period_dist_vec)),
-    ])
-
+    tost_matrix = _delay_matrix(delay_distributions["tost"], n_days, first_lag=0)
+    inc_period_matrix = _delay_matrix(
+        delay_distributions["inc_period"], n_days, first_lag=1
+    )
+    likelihood_idx = _get_likelihood_idx(
+        incidence_vec, inc_period_matrix @ (tost_matrix @ incidence_vec)
+    )
     nonzero_incidence_idx = incidence_vec > 0
-    no_case_days = int(np.sum(nonzero_incidence_idx))
-    incidence_vec_local = np.zeros(n_days)
-    incidence_vec_local[1:] = incidence_vec[1:]
-
-    conv_matrix_1 = np.zeros((n_days, n_days))
-    for t in range(n_days):
-        conv_matrix_1[t, : (t + 1)] = tost_dist_vec[: (t + 1)][::-1]
-
-    conv_matrix_2 = np.zeros((n_days, n_days))
-    for t in range(1, n_days):
-        conv_matrix_2[t, :t] = inc_period_dist_vec[:t][::-1]
-
-    nonzero_fod_idx = np.dot(conv_matrix_2, np.dot(conv_matrix_1, incidence_vec)) > 0
-    if np.any(incidence_vec_local[~nonzero_fod_idx]):
-        raise ValueError(
-            "Local incidence cannot be greater than zero when force of disease is 0."
-        )
 
     with pm.Model() as model:
-        rep_no_vec, dispersion = _build_rep_no_vec_dispersion(
+        rep_no_vec = _build_rep_no_vec(
             priors=priors, switch_day=switch_day, n_days=n_days
         )
+        dispersion = _prior_rv("dispersion", priors)
 
-        u = pm.Uniform("u", 0, 1, shape=no_case_days)
-        scaled_incidence_case_days = pm.Deterministic(
+        scaled_incidence_case_days = _gamma_via_uniform(
             "scaled_incidence_case_days",
-            pm.icdf(
-                pm.Gamma.dist(
-                    alpha=dispersion * (incidence_vec[nonzero_incidence_idx]),
-                    beta=dispersion,
-                    shape=no_case_days,
-                ),
-                u,
-            ),
+            mean_vec=incidence_vec[nonzero_incidence_idx],
+            dispersion=dispersion,
         )
-
         expected_infection_incidence_local = rep_no_vec * pm.math.dot(
-            conv_matrix_1[:, nonzero_incidence_idx],
+            tost_matrix[:, nonzero_incidence_idx],
             scaled_incidence_case_days,
         )
         expected_incidence_local = pm.math.dot(
-            conv_matrix_2, expected_infection_incidence_local
+            inc_period_matrix, expected_infection_incidence_local
         )
 
         pm.Poisson(
             "likelihood",
-            mu=expected_incidence_local[nonzero_fod_idx],
-            observed=incidence_vec_local[nonzero_fod_idx],
+            mu=expected_incidence_local[likelihood_idx],
+            observed=incidence_vec[likelihood_idx],
         )
     return model
 
 
-def _build_rep_no_vec_dispersion(priors, switch_day, n_days):
-    rep_no_before_prior_func, rep_no_before_prior_kwargs = priors.get(
-        "rep_no_before", DEFAULT_PRIORS["rep_no_before"]
-    )
-    rep_no_after_prior_func, rep_no_after_prior_kwargs = priors.get(
-        "rep_no_after", DEFAULT_PRIORS["rep_no_after"]
-    )
-    dispersion_prior_func, dispersion_prior_kwargs = priors.get(
-        "dispersion", DEFAULT_PRIORS["dispersion"]
-    )
-    rep_no_before = rep_no_before_prior_func(
-        "rep_no_before", **rep_no_before_prior_kwargs
-    )
-    rep_no_after = rep_no_after_prior_func("rep_no_after", **rep_no_after_prior_kwargs)
-    dispersion = dispersion_prior_func("dispersion", **dispersion_prior_kwargs)
+def _build_rep_no_vec(priors, switch_day, n_days):
+    rep_no_before = _prior_rv("rep_no_before", priors)
+    rep_no_after = _prior_rv("rep_no_after", priors)
 
-    rep_no_vec = pm.math.concatenate([
-        pm.math.full(switch_day, rep_no_before),
-        pm.math.full(n_days - switch_day, rep_no_after),
-    ])
-    return rep_no_vec, dispersion
+    return pm.math.concatenate(
+        [
+            pm.math.full(switch_day, rep_no_before),
+            pm.math.full(n_days - switch_day, rep_no_after),
+        ]
+    )
+
+
+def _prior_rv(name, priors):
+    prior_func, prior_kwargs = priors[name]
+    return prior_func(name, **prior_kwargs)
+
+
+def _delay_matrix(dist_vec, n_days, first_lag):
+    # Lower-triangular matrix with [t, s] entry dist_vec[t - s - first_lag], so that
+    # (matrix @ x)[t] is the convolution of x with a delay whose pmf at lag first_lag + i
+    # is dist_vec[i]
+    dist_vec = dist_vec[: n_days - first_lag]
+    first_col = np.zeros(n_days)
+    first_col[first_lag : first_lag + len(dist_vec)] = dist_vec
+    return scipy.linalg.toeplitz(first_col, np.zeros(n_days))
+
+
+def _get_likelihood_idx(incidence_vec, force_vec):
+    # Days with nonzero force of infection/disease. Day-0 cases are imported; later cases
+    # are local, so are only possible on these days
+    likelihood_idx = force_vec > 0
+    if np.any(incidence_vec[1:][~likelihood_idx[1:]]):
+        raise ValueError(
+            "Local incidence cannot be greater than zero when force of "
+            "infection/disease is 0."
+        )
+    return likelihood_idx
+
+
+def _gamma_via_uniform(name, mean_vec, dispersion):
+    # Gamma(dispersion * mean_vec, dispersion) variable, so with mean mean_vec. Inverse
+    # gamma transformation prevents NUTS sampling but improves efficiency
+    u = pm.Uniform("u", 0, 1, shape=len(mean_vec))
+    return pm.Deterministic(
+        name,
+        pm.icdf(
+            pm.Gamma.dist(
+                alpha=dispersion * mean_vec, beta=dispersion, shape=len(mean_vec)
+            ),
+            u,
+        ),
+    )
