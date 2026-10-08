@@ -32,14 +32,16 @@ def fit_model(
         if step is not None:
             sample_kwargs["step"] = step()
 
-        trace = pm.sample(
-            random_seed=rng,
-            idata_kwargs={"log_likelihood": True, "log_prior": True},
-            **sample_kwargs,
-        )
+        trace = pm.sample(random_seed=rng, **sample_kwargs)
     if thin > 1:
         trace = trace.isel(draw=slice(0, None, thin))
-        trace = trace.assign_coords(draw=np.arange(len(trace.posterior.draw)))
+        trace = trace.map_over_datasets(
+            lambda ds: (
+                ds.assign_coords(draw=np.arange(ds.sizes["draw"]))
+                if "draw" in ds.dims
+                else ds
+            )
+        )
     return trace
 
 
