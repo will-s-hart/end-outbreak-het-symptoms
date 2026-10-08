@@ -1,8 +1,11 @@
 import numpy as np
 import pymc as pm
-import scipy.linalg
 
-from endoutbreakhet.utils import lognormal_params_from_median_percentile_2_5
+from endoutbreakhet.utils import (
+    delay_matrix,
+    get_likelihood_idx,
+    parse_lognormal_prior,
+)
 
 
 def fit_model(
@@ -12,9 +15,10 @@ def fit_model(
     switch_day,
     delay_distributions,
     priors,
+    rng,
     step=None,
     thin=1,
-    **kwargs_sample,
+    **sample_kwargs,
 ):
     pm_model = _build_pymc_model(
         model_name=model_name,
@@ -26,10 +30,12 @@ def fit_model(
 
     with pm_model:
         if step is not None:
-            kwargs_sample["step"] = step()
+            sample_kwargs["step"] = step()
 
         trace = pm.sample(
-            idata_kwargs={"log_likelihood": True, "log_prior": True}, **kwargs_sample
+            random_seed=rng,
+            idata_kwargs={"log_likelihood": True, "log_prior": True},
+            **sample_kwargs,
         )
     if thin > 1:
         trace = trace.isel(draw=slice(0, None, thin))
@@ -61,18 +67,20 @@ def _build_pymc_model(
 
 def _build_poisson_model(*, incidence_vec, switch_day, delay_distributions, priors):
     n_days = len(incidence_vec)
-    serial_interval_matrix = _delay_matrix(
+    serial_interval_matrix = delay_matrix(
         dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
     )
-    foi_vec = serial_interval_matrix @ incidence_vec
-    likelihood_idx = _get_likelihood_idx(incidence_vec=incidence_vec, force_vec=foi_vec)
+    total_inf_vec = serial_interval_matrix @ incidence_vec
+    likelihood_idx = get_likelihood_idx(
+        incidence_vec=incidence_vec, force_vec=total_inf_vec
+    )
 
     with pm.Model() as model:
         rep_no_vec = _build_rep_no_vec(
             priors=priors, switch_day=switch_day, n_days=n_days
         )
 
-        expected_incidence_local = rep_no_vec * foi_vec
+        expected_incidence_local = rep_no_vec * total_inf_vec
 
         pm.Poisson(
             "likelihood",
@@ -84,11 +92,13 @@ def _build_poisson_model(*, incidence_vec, switch_day, delay_distributions, prio
 
 def _build_sse_model(*, incidence_vec, switch_day, delay_distributions, priors):
     n_days = len(incidence_vec)
-    serial_interval_matrix = _delay_matrix(
+    serial_interval_matrix = delay_matrix(
         dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
     )
-    foi_vec = serial_interval_matrix @ incidence_vec
-    likelihood_idx = _get_likelihood_idx(incidence_vec=incidence_vec, force_vec=foi_vec)
+    total_inf_vec = serial_interval_matrix @ incidence_vec
+    likelihood_idx = get_likelihood_idx(
+        incidence_vec=incidence_vec, force_vec=total_inf_vec
+    )
 
     with pm.Model() as model:
         rep_no_vec = _build_rep_no_vec(
@@ -96,11 +106,11 @@ def _build_sse_model(*, incidence_vec, switch_day, delay_distributions, priors):
         )
         dispersion = _prior_rv(name="dispersion", priors=priors)
 
-        expected_incidence_local = rep_no_vec * foi_vec
+        expected_incidence_local = rep_no_vec * total_inf_vec
 
         pm.NegativeBinomial(
             "likelihood",
-            alpha=dispersion * foi_vec[likelihood_idx],
+            alpha=dispersion * total_inf_vec[likelihood_idx],
             mu=expected_incidence_local[likelihood_idx],
             observed=incidence_vec[likelihood_idx],
         )
@@ -109,10 +119,10 @@ def _build_sse_model(*, incidence_vec, switch_day, delay_distributions, priors):
 
 def _build_ssi_model(*, incidence_vec, switch_day, delay_distributions, priors):
     n_days = len(incidence_vec)
-    serial_interval_matrix = _delay_matrix(
+    serial_interval_matrix = delay_matrix(
         dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
     )
-    likelihood_idx = _get_likelihood_idx(
+    likelihood_idx = get_likelihood_idx(
         incidence_vec=incidence_vec, force_vec=serial_interval_matrix @ incidence_vec
     )
     nonzero_incidence_idx = incidence_vec > 0
@@ -123,15 +133,15 @@ def _build_ssi_model(*, incidence_vec, switch_day, delay_distributions, priors):
         )
         dispersion = _prior_rv(name="dispersion", priors=priors)
 
-        scaled_incidence_case_days = _gamma_via_uniform(
-            name="scaled_incidence_case_days",
+        cohort_inf_case_days = _gamma_via_uniform(
+            name="cohort_inf_case_days",
             mean_vec=incidence_vec[nonzero_incidence_idx],
             shape_vec=dispersion * incidence_vec[nonzero_incidence_idx],
         )
-        foi_vec = pm.math.dot(
-            serial_interval_matrix[:, nonzero_incidence_idx], scaled_incidence_case_days
+        total_inf_vec = pm.math.dot(
+            serial_interval_matrix[:, nonzero_incidence_idx], cohort_inf_case_days
         )
-        expected_incidence_local = rep_no_vec * foi_vec
+        expected_incidence_local = rep_no_vec * total_inf_vec
 
         pm.Poisson(
             "likelihood",
@@ -143,11 +153,13 @@ def _build_ssi_model(*, incidence_vec, switch_day, delay_distributions, priors):
 
 def _build_dlo_model(*, incidence_vec, switch_day, delay_distributions, priors):
     n_days = len(incidence_vec)
-    serial_interval_matrix = _delay_matrix(
+    serial_interval_matrix = delay_matrix(
         dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
     )
-    foi_vec = serial_interval_matrix @ incidence_vec
-    likelihood_idx = _get_likelihood_idx(incidence_vec=incidence_vec, force_vec=foi_vec)
+    total_inf_vec = serial_interval_matrix @ incidence_vec
+    likelihood_idx = get_likelihood_idx(
+        incidence_vec=incidence_vec, force_vec=total_inf_vec
+    )
 
     with pm.Model() as model:
         rep_no_vec = _build_rep_no_vec(
@@ -155,7 +167,7 @@ def _build_dlo_model(*, incidence_vec, switch_day, delay_distributions, priors):
         )
         dispersion = _prior_rv(name="dispersion", priors=priors)
 
-        expected_incidence_local = rep_no_vec * foi_vec
+        expected_incidence_local = rep_no_vec * total_inf_vec
 
         pm.NegativeBinomial(
             "likelihood",
@@ -168,15 +180,15 @@ def _build_dlo_model(*, incidence_vec, switch_day, delay_distributions, priors):
 
 def _build_poisson_so_model(*, incidence_vec, switch_day, delay_distributions, priors):
     n_days = len(incidence_vec)
-    tost_matrix = _delay_matrix(
+    tost_matrix = delay_matrix(
         dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
     )
-    inc_period_matrix = _delay_matrix(
+    inc_period_matrix = delay_matrix(
         dist_vec=delay_distributions["inc_period"], n_days=n_days, first_lag=1
     )
-    foi_vec = tost_matrix @ incidence_vec
-    likelihood_idx = _get_likelihood_idx(
-        incidence_vec=incidence_vec, force_vec=inc_period_matrix @ foi_vec
+    total_inf_vec = tost_matrix @ incidence_vec
+    likelihood_idx = get_likelihood_idx(
+        incidence_vec=incidence_vec, force_vec=inc_period_matrix @ total_inf_vec
     )
 
     with pm.Model() as model:
@@ -184,7 +196,9 @@ def _build_poisson_so_model(*, incidence_vec, switch_day, delay_distributions, p
             priors=priors, switch_day=switch_day, n_days=n_days
         )
 
-        expected_incidence_local = pm.math.dot(inc_period_matrix, rep_no_vec * foi_vec)
+        expected_incidence_local = pm.math.dot(
+            inc_period_matrix, rep_no_vec * total_inf_vec
+        )
 
         pm.Poisson(
             "likelihood",
@@ -196,16 +210,17 @@ def _build_poisson_so_model(*, incidence_vec, switch_day, delay_distributions, p
 
 def _build_sse_so_model(*, incidence_vec, switch_day, delay_distributions, priors):
     n_days = len(incidence_vec)
-    tost_matrix = _delay_matrix(
+    tost_matrix = delay_matrix(
         dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
     )
-    inc_period_matrix = _delay_matrix(
+    inc_period_matrix = delay_matrix(
         dist_vec=delay_distributions["inc_period"], n_days=n_days, first_lag=1
     )
-    foi_vec = tost_matrix @ incidence_vec
-    nonzero_foi_idx = foi_vec > 0
-    likelihood_idx = _get_likelihood_idx(
-        incidence_vec=incidence_vec, force_vec=inc_period_matrix @ foi_vec
+    expected_total_inf_vec = tost_matrix @ incidence_vec
+    nonzero_total_inf_idx = expected_total_inf_vec > 0
+    likelihood_idx = get_likelihood_idx(
+        incidence_vec=incidence_vec,
+        force_vec=inc_period_matrix @ expected_total_inf_vec,
     )
 
     with pm.Model() as model:
@@ -214,14 +229,14 @@ def _build_sse_so_model(*, incidence_vec, switch_day, delay_distributions, prior
         )
         dispersion = _prior_rv(name="dispersion", priors=priors)
 
-        foi_scaled_nonzero_days = _gamma_via_uniform(
-            name="foi_scaled_nonzero_days",
-            mean_vec=foi_vec[nonzero_foi_idx],
-            shape_vec=dispersion * foi_vec[nonzero_foi_idx],
+        total_inf_nonzero_days = _gamma_via_uniform(
+            name="total_inf_nonzero_days",
+            mean_vec=expected_total_inf_vec[nonzero_total_inf_idx],
+            shape_vec=dispersion * expected_total_inf_vec[nonzero_total_inf_idx],
         )
         expected_incidence_local = pm.math.dot(
-            inc_period_matrix[:, nonzero_foi_idx],
-            foi_scaled_nonzero_days * rep_no_vec[nonzero_foi_idx],
+            inc_period_matrix[:, nonzero_total_inf_idx],
+            total_inf_nonzero_days * rep_no_vec[nonzero_total_inf_idx],
         )
 
         pm.Poisson(
@@ -234,13 +249,13 @@ def _build_sse_so_model(*, incidence_vec, switch_day, delay_distributions, prior
 
 def _build_ssi_so_model(*, incidence_vec, switch_day, delay_distributions, priors):
     n_days = len(incidence_vec)
-    tost_matrix = _delay_matrix(
+    tost_matrix = delay_matrix(
         dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
     )
-    inc_period_matrix = _delay_matrix(
+    inc_period_matrix = delay_matrix(
         dist_vec=delay_distributions["inc_period"], n_days=n_days, first_lag=1
     )
-    likelihood_idx = _get_likelihood_idx(
+    likelihood_idx = get_likelihood_idx(
         incidence_vec=incidence_vec,
         force_vec=inc_period_matrix @ (tost_matrix @ incidence_vec),
     )
@@ -252,15 +267,15 @@ def _build_ssi_so_model(*, incidence_vec, switch_day, delay_distributions, prior
         )
         dispersion = _prior_rv(name="dispersion", priors=priors)
 
-        scaled_incidence_case_days = _gamma_via_uniform(
-            name="scaled_incidence_case_days",
+        cohort_inf_case_days = _gamma_via_uniform(
+            name="cohort_inf_case_days",
             mean_vec=incidence_vec[nonzero_incidence_idx],
             shape_vec=dispersion * incidence_vec[nonzero_incidence_idx],
         )
-        expected_infection_incidence_local = rep_no_vec * pm.math.dot(
-            tost_matrix[:, nonzero_incidence_idx],
-            scaled_incidence_case_days,
+        total_inf_vec = pm.math.dot(
+            tost_matrix[:, nonzero_incidence_idx], cohort_inf_case_days
         )
+        expected_infection_incidence_local = rep_no_vec * total_inf_vec
         expected_incidence_local = pm.math.dot(
             inc_period_matrix, expected_infection_incidence_local
         )
@@ -286,40 +301,7 @@ def _build_rep_no_vec(*, priors, switch_day, n_days):
 
 
 def _prior_rv(*, name, priors):
-    prior_kwargs = priors[name]
-    if prior_kwargs.get("dist", None) == "lognormal":
-        return pm.LogNormal(
-            name,
-            **lognormal_params_from_median_percentile_2_5(
-                median=prior_kwargs["median"],
-                percentile_2_5=prior_kwargs["quantile_025"],
-            ),
-        )
-    raise ValueError(
-        f"Unsupported prior distribution for {name}: {prior_kwargs.get('dist', None)}"
-    )
-
-
-def _delay_matrix(*, dist_vec, n_days, first_lag):
-    # Lower-triangular matrix with [t, s] entry dist_vec[t - s - first_lag], so that
-    # (matrix @ x)[t] is the convolution of x with a delay whose pmf at lag first_lag + i
-    # is dist_vec[i]
-    dist_vec = dist_vec[: n_days - first_lag]
-    first_col = np.zeros(n_days)
-    first_col[first_lag : first_lag + len(dist_vec)] = dist_vec
-    return scipy.linalg.toeplitz(first_col, np.zeros(n_days))
-
-
-def _get_likelihood_idx(*, incidence_vec, force_vec):
-    # Days with nonzero force of infection/disease. Day-0 cases are imported; later cases
-    # are local, so are only possible on these days
-    likelihood_idx = force_vec > 0
-    if np.any(incidence_vec[1:][~likelihood_idx[1:]]):
-        raise ValueError(
-            "Local incidence cannot be greater than zero when force of "
-            "infection/disease is 0."
-        )
-    return likelihood_idx
+    return pm.LogNormal(name, **parse_lognormal_prior(name=name, priors=priors))
 
 
 def _gamma_via_uniform(*, name, mean_vec, shape_vec):

@@ -3,6 +3,7 @@ from typing import Protocol
 
 import numpy as np
 import scipy.integrate
+import scipy.linalg
 import scipy.stats
 from numpy.typing import NDArray
 
@@ -68,7 +69,40 @@ def gamma_dist_from_mean_sd(*, mean: float, sd: float):
     return scipy.stats.gamma(a=(mean / sd) ** 2, scale=sd**2 / mean)
 
 
-def lognormal_params_from_median_percentile_2_5(*, median, percentile_2_5):
+def lognormal_params_from_median_quantile_025(*, median, quantile_025):
     mu = np.log(median)
-    sigma = (mu - np.log(percentile_2_5)) / scipy.stats.norm.ppf(0.975)
+    sigma = (mu - np.log(quantile_025)) / scipy.stats.norm.ppf(0.975)
     return {"mu": mu, "sigma": sigma}
+
+
+def parse_lognormal_prior(*, name, priors):
+    prior = priors[name]
+    if prior.get("dist", None) != "lognormal":
+        raise ValueError(
+            f"Unsupported prior distribution for {name}: {prior.get('dist', None)}"
+        )
+    return lognormal_params_from_median_quantile_025(
+        median=prior["median"], quantile_025=prior["quantile_025"]
+    )
+
+
+def delay_matrix(*, dist_vec, n_days, first_lag):
+    # Lower-triangular matrix with [t, s] entry dist_vec[t - s - first_lag], so that
+    # (matrix @ x)[t] is the convolution of x with a delay whose pmf at lag first_lag + i
+    # is dist_vec[i]
+    dist_vec = dist_vec[: n_days - first_lag]
+    first_col = np.zeros(n_days)
+    first_col[first_lag : first_lag + len(dist_vec)] = dist_vec
+    return scipy.linalg.toeplitz(first_col, np.zeros(n_days))
+
+
+def get_likelihood_idx(*, incidence_vec, force_vec):
+    # Days with nonzero force of infection/disease. Day-0 cases are imported; later cases
+    # are local, so are only possible on these days
+    likelihood_idx = force_vec > 0
+    if np.any(incidence_vec[1:][~likelihood_idx[1:]]):
+        raise ValueError(
+            "Local incidence cannot be greater than zero when force of "
+            "infection/disease is 0."
+        )
+    return likelihood_idx
