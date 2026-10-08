@@ -1,0 +1,119 @@
+\documentclass{article}
+\usepackage{amsmath}
+
+\newcommand{\PoissonDist}[1]{\mathrm{Poisson}\left(#1\right)}
+\newcommand{\NBDist}[2]{\mathrm{NB}\left(\mathrm{mean}=#1,
+\mathrm{dispersion}=#2\right)}
+\newcommand{\GammaDist}[2]{\mathrm{Gamma}\left(\mathrm{shape}=#1,
+\mathrm{rate}=#2\right)}
+\newcommand{\MultinomialDist}[2]{\mathrm{Multinomial}\left(#1; #2\right)}
+\newcommand{\incPMF}{p^{(inc)}}
+\newcommand{\tostPMF}{p^{(tost)}}
+
+\begin{document}
+
+\section{Naive models}
+\subsection{Poisson model}
+\subsubsection{Model definition}
+
+\begin{align}
+  \lambda_{t} &= \sum_{s=1}^{m} C_{t-s} w_s,\\
+  C_t &\sim \PoissonDist{R_{t}\lambda_{t}}.
+\end{align}
+
+\subsection{DLO model}
+\subsubsection{Model definition}
+
+\begin{align}
+  \lambda_{t} &= \sum_{s=1}^{m} C_{t-s} w_s,\\
+  C_t &\sim \NBDist{R_{t}\lambda_{t}}{k}.
+\end{align}
+
+\subsection{SSE model}
+\subsubsection{Model definition}
+
+\begin{align}
+  \lambda_{t} &= \sum_{s=1}^{m} C_{t-s} w_s,\\
+  C_t &\sim \NBDist{R_{t}\lambda_{t}}{k\lambda_{t}}.
+\end{align}
+
+\subsection{SSI model}
+\subsubsection{Model definition}
+
+\begin{align}
+  \lambda_{t} &= \sum_{s=1}^{m} Y_{t-s} w_s,\\
+  C_t &\sim \PoissonDist{R_{t}\lambda_{t}},\\
+  Y_t &\sim \GammaDist{kC_t}{k}
+\end{align}
+
+\section{Symptom onset-anchored models}
+
+In all symptom onset-anchored models, the number of new infections on
+day \(t\) is sampled based on the number of new symptom onsets up to
+and including day \(t\), based on the TOST distribution. The number of symptom
+onsets on day \(t\) in each model is then obtained based on incubation
+period samples from the new infections on previous days:
+\begin{align}
+  I_{t,1}, \ldots, I_{t,m_{inc}} &\sim \MultinomialDist{I_t}{\incPMF_{1},
+  \ldots, \incPMF_{m_{inc}}},\\
+  C_{t} &= \sum_{\tau=1}^{m_{inc}} I_{t-\tau,\tau}.
+\end{align}
+
+\subsection{Poisson-SO model}
+\subsubsection{Model definition}
+
+\begin{align}
+  \lambda_{t} &= \sum_{s=0}^{m_{tost}} C_{t-s} \tostPMF_{s},\\
+  I_t &\sim \PoissonDist{R_{t}\lambda_{t}}.
+\end{align}
+
+\subsubsection{Equivalent form}
+
+\begin{align}
+  C_t &\sim \PoissonDist{\sum_{s=1}^{m_{inc}} E_{t-s} \incPMF_{s}},\\
+  E_t &= R_{t}\sum_{s=0}^{m_{tost}} C_{t-s} \tostPMF_{s}.
+\end{align}
+
+\subsection{SSE-SO model}
+\subsubsection{Model definition}
+
+\begin{align}
+  \lambda_{t} &= \sum_{s=0}^{m_{tost}} C_{t-s} \tostPMF_{s},\\
+  I_t &\sim \NBDist{R_{t}\lambda_{t}}{k\lambda_{t}}.
+\end{align}
+
+\subsubsection{Equivalent form}
+
+First rewrite in terms of a Poisson-Gamma mixture:
+\begin{align}
+  \lambda_{t} &= \sum_{s=0}^{m_{tost}} C_{t-s} \tostPMF_{s},\\
+  Z_t &\sim \GammaDist{k\lambda_{t}}{k},\\
+  I_t &\sim \PoissonDist{R_{t}Z_t}.
+\end{align}
+
+Equivalent to:
+\begin{align}
+  C_t &\sim \PoissonDist{\sum_{s=1}^{m_{inc}} E_{t-s} \incPMF_{s}},\\
+  E_t &= R_{t}Z_t,\\
+  \lambda_{t} &= \sum_{s=0}^{m_{tost}} C_{t-s} \tostPMF_{s},\\
+  Z_t &\sim \GammaDist{k\lambda_{t}}{k}.
+\end{align}
+
+\subsection{SSI-SO model}
+\subsubsection{Model definition}
+
+\begin{align}
+  \lambda_{t} &= \sum_{s=0}^{m_{tost}} Y_{t-s} \tostPMF_s,\\
+  I_t &\sim \PoissonDist{R_{t}\lambda_{t}},\\
+  Y_t &\sim \GammaDist{kC_t}{k}.
+\end{align}
+
+\subsubsection{Equivalent form}
+
+\begin{align}
+  C_t &\sim \PoissonDist{\sum_{s=1}^{m_{inc}} E_{t-s} \incPMF_{s}},\\
+  E_t &= R_{t}\sum_{s=0}^{m_{tost}} Y_{t-s} \tostPMF_{s},\\
+  Y_t &\sim \GammaDist{kC_t}{k}.
+\end{align}
+
+\end{document}
