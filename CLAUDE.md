@@ -24,6 +24,20 @@ file in step as they land: describe what exists, not what is planned.
 - `Snakefile` — orchestrates the full results-and-figures pipeline.
 - `data/` — inputs. `results/`, `figures/` — generated outputs, committed.
 
+## Keyword-only arguments
+
+Every function the repo defines (package, scripts, tests, private and nested helpers) makes
+all its parameters keyword-only, `def f(*, a, b=1)` (after `self`/`cls` for methods), and every
+call to one passes keyword arguments. Call sites then stay correct when parameters are added,
+removed or reordered.
+
+- Exception: signatures dictated by a third-party API, such as callbacks (a
+  `scipy.integrate.quad` integrand takes its variable positionally) or Protocols mirroring
+  scipy methods. Keep only the parameters the API passes positionally; make the rest
+  keyword-only and bind them by keyword (e.g. `functools.partial(f, x=x)`).
+- Calls into third-party libraries follow those libraries' usual style (`np.zeros(n)`,
+  `pm.Normal("name", ...)`).
+
 ## Running scripts
 
 Scripts are run **as modules from the repo root**: `pixi run python -m scripts.<name>`. Never
