@@ -8,6 +8,7 @@ from endoutbreakhet.utils import (
     discretise_cori,
     gamma_dist_from_mean_sd,
     get_likelihood_idx,
+    get_rep_no_vec_samples,
     parse_lognormal_prior,
 )
 
@@ -40,6 +41,18 @@ def test_get_likelihood_idx_raises_for_local_case_without_force():
         get_likelihood_idx(
             incidence_vec=np.array([3, 1, 1]), force_vec=np.array([0.0, 1.0, 0.0])
         )
+
+
+def test_get_rep_no_vec_samples():
+    rep_no_vec_samples = get_rep_no_vec_samples(
+        rep_no_before_samples=np.array([1.5, 2.0]),
+        rep_no_after_samples=np.array([0.5, 0.3]),
+        switch_day=2,
+        n_days=4,
+    )
+    np.testing.assert_array_equal(
+        rep_no_vec_samples, [[1.5, 1.5, 0.5, 0.5], [2.0, 2.0, 0.3, 0.3]]
+    )
 
 
 def test_parse_lognormal_prior():

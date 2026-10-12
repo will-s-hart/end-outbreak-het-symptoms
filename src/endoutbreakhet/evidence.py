@@ -6,6 +6,7 @@ import scipy.stats
 from endoutbreakhet.utils import (
     delay_matrix,
     get_likelihood_idx,
+    get_rep_no_vec_samples,
     parse_lognormal_prior,
 )
 
@@ -170,7 +171,7 @@ def _poisson_log_likelihood_samples(
         incidence_vec=incidence_vec, force_vec=total_inf_vec
     )
 
-    rep_no_vec_samples = _rep_no_vec_samples(
+    rep_no_vec_samples = get_rep_no_vec_samples(
         rep_no_before_samples=rep_no_before_samples,
         rep_no_after_samples=rep_no_after_samples,
         switch_day=switch_day,
@@ -203,7 +204,7 @@ def _sse_log_likelihood_samples(
         incidence_vec=incidence_vec, force_vec=total_inf_vec
     )
 
-    rep_no_vec_samples = _rep_no_vec_samples(
+    rep_no_vec_samples = get_rep_no_vec_samples(
         rep_no_before_samples=rep_no_before_samples,
         rep_no_after_samples=rep_no_after_samples,
         switch_day=switch_day,
@@ -238,7 +239,7 @@ def _ssi_log_likelihood_samples(
     )
     nonzero_incidence_idx = incidence_vec > 0
 
-    rep_no_vec_samples = _rep_no_vec_samples(
+    rep_no_vec_samples = get_rep_no_vec_samples(
         rep_no_before_samples=rep_no_before_samples,
         rep_no_after_samples=rep_no_after_samples,
         switch_day=switch_day,
@@ -279,7 +280,7 @@ def _dlo_log_likelihood_samples(
         incidence_vec=incidence_vec, force_vec=total_inf_vec
     )
 
-    rep_no_vec_samples = _rep_no_vec_samples(
+    rep_no_vec_samples = get_rep_no_vec_samples(
         rep_no_before_samples=rep_no_before_samples,
         rep_no_after_samples=rep_no_after_samples,
         switch_day=switch_day,
@@ -315,7 +316,7 @@ def _poisson_so_log_likelihood_samples(
         incidence_vec=incidence_vec, force_vec=inc_period_matrix @ total_inf_vec
     )
 
-    rep_no_vec_samples = _rep_no_vec_samples(
+    rep_no_vec_samples = get_rep_no_vec_samples(
         rep_no_before_samples=rep_no_before_samples,
         rep_no_after_samples=rep_no_after_samples,
         switch_day=switch_day,
@@ -356,7 +357,7 @@ def _sse_so_log_likelihood_samples(
         force_vec=inc_period_matrix @ expected_total_inf_vec,
     )
 
-    rep_no_vec_samples = _rep_no_vec_samples(
+    rep_no_vec_samples = get_rep_no_vec_samples(
         rep_no_before_samples=rep_no_before_samples,
         rep_no_after_samples=rep_no_after_samples,
         switch_day=switch_day,
@@ -402,7 +403,7 @@ def _ssi_so_log_likelihood_samples(
     )
     nonzero_incidence_idx = incidence_vec > 0
 
-    rep_no_vec_samples = _rep_no_vec_samples(
+    rep_no_vec_samples = get_rep_no_vec_samples(
         rep_no_before_samples=rep_no_before_samples,
         rep_no_after_samples=rep_no_after_samples,
         switch_day=switch_day,
@@ -485,16 +486,6 @@ def _log_prior_samples(*, unconstrained_samples, param_names, has_latents, prior
             unconstrained_samples[:, len(param_names) :]
         ).sum(axis=-1)
     return log_prior_samples
-
-
-def _rep_no_vec_samples(
-    *, rep_no_before_samples, rep_no_after_samples, switch_day, n_days
-):
-    return np.where(
-        np.arange(n_days) < switch_day,
-        rep_no_before_samples[:, None],
-        rep_no_after_samples[:, None],
-    )
 
 
 def _nbinom_logpmf(*, k, mean, dispersion):

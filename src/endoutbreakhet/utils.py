@@ -106,3 +106,13 @@ def get_likelihood_idx(*, incidence_vec, force_vec):
             "infection/disease is 0."
         )
     return likelihood_idx
+
+
+def get_rep_no_vec_samples(
+    *, rep_no_before_samples, rep_no_after_samples, switch_day, n_days
+):
+    return np.where(
+        np.arange(n_days) < switch_day,
+        rep_no_before_samples[:, None],
+        rep_no_after_samples[:, None],
+    )
