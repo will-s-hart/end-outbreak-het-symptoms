@@ -14,11 +14,16 @@ platforms = ["linux-64", "linux-aarch64", "osx-arm64", "osx-64", "win-64"]
 
 [tool.pixi.dependencies]
 arviz-stats = "*"
+joblib = "*"
 matplotlib = "*"
+netcdf4 = "*"
 numpy = "*"
 pandas = "*"
 pymc = "*"
+pytensor = "*"
 scipy = "*"
+tqdm = "*"
+xarray = "*"
 
 [tool.pixi.pypi-dependencies]
 endoutbreakhet = { path = ".", editable = true }

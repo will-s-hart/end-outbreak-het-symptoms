@@ -228,3 +228,7 @@ __marimo__/
 # Claude Code (personal, gitignored)
 CLAUDE.local.md
 .claude/settings.local.json
+
+# Full MCMC traces (large, and rewritten on every run); the tracked posterior.csv files
+# hold the samples needed for plots
+results/**/trace.nc

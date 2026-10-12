@@ -9,7 +9,8 @@ Analysis of the risk of additional cases at the apparent end of an outbreak, acc
 superspreading and symptom-linked infectiousness. A library package drives a Snakemake workflow
 that produces the numerical results and figures.
 
-**Status: skeleton only.** There is no library code, analysis or Snakemake rule yet. Keep this
+**Status:** the library (model fitting, risk, evidence and the rolling-fit pipeline) and the
+`model_fits` analysis script exist; there are no plot scripts or Snakemake rules yet. Keep this
 file in step as they land: describe what exists, not what is planned.
 
 ## Layout
@@ -18,11 +19,13 @@ file in step as they land: describe what exists, not what is planned.
   take effect immediately). `__init__.__all__` is the public API. Modules lead with their
   public functions; private `_helpers` sit below them. Keep imports between modules one-way,
   with no cycles.
-- `scripts/` — analysis + plot script pairs plus shared `inputs.py` (see below). A package at
-  the repo root, **not** under `src/`.
+- `scripts/` — analysis and plot scripts plus shared `inputs.py` (see below). A package at the
+  repo root, **not** under `src/`.
 - `tests/` — top-level pytest suite (not nested under the package).
 - `Snakefile` — orchestrates the full results-and-figures pipeline.
-- `data/` — inputs. `results/`, `figures/` — generated outputs, committed.
+- `data/` — inputs. `results/`, `figures/` — generated outputs, committed, except full MCMC
+  traces (`results/**/trace.nc`, gitignored); what plots need from a trace is saved alongside
+  it as a tracked CSV.
 
 ## Keyword-only arguments
 
@@ -51,26 +54,28 @@ The Snakefile is the single source of truth for reproduction. **Don't add ad-hoc
 commands** — wire them in as rules.
 
 - `all` (default) builds every figure; `results` builds every results file only.
-- Each analysis gets a `<name>_results` rule running `pixi run python -m scripts.<name> -r` and a
-  `<name>_plots` rule running `pixi run python -m scripts.<name>_plots`.
-- Every rule lists `shared_input_paths` (all package modules, globbed) plus its own script(s),
-  data files and upstream results as inputs, so a change to shared code triggers a rebuild.
-  Once `scripts/inputs.py` exists, add it to `shared_input_paths`.
+- Each analysis script gets a rule running `pixi run python -m scripts.<name>`, with a wildcard
+  for each parameter it takes (e.g. `--spec {spec}`, one job per value). Each plot script gets a
+  rule running `pixi run python -m scripts.<topic>_plots`, whose inputs are the results files
+  it reads.
+- Every rule lists `shared_input_paths` (all package modules, globbed, and `scripts/inputs.py`)
+  plus its own script, data files and upstream results as inputs, so a change to shared code
+  triggers a rebuild.
 - Add each analysis's output paths to the `results_paths` / `figure_paths` aggregates.
 
 ## Analysis vs plotting convention
 
-Every analysis is a **script pair**: `scripts/<name>.py` does the heavy compute,
-`scripts/<name>_plots.py` makes the figures.
+Compute and plotting are separate scripts, not fixed pairs, since a figure can combine results
+from several analyses or several runs of one (e.g. overlapping sets of model specs).
 
-- `<name>.py` always takes `-r/--results-only` (skip plotting). Without `-r` it also calls the
-  plot script's `make_plots`, which is handy for one-shot local iteration but never the
-  Snakemake path.
-- **All input/parameter assembly lives in `scripts/inputs.py`** as `get_inputs_<name>(...)`,
-  returning a dict that includes `results_paths`, `fig_paths` and the prepared
-  arrays/parameters. Both scripts in a pair call it; never duplicate path construction.
-- Outputs follow `results/<name>/<output>.csv` and `figures/<name>/<output>.svg`. Snakemake
-  `output:` lists assume this.
+- **Analysis scripts** `scripts/<name>.py` do the heavy compute and write results. One may take
+  parameters (e.g. `--spec`), each value run as its own job.
+- **Plot scripts** `scripts/<topic>_plots.py` only read results (never fit), and make figures.
+- **All input/parameter assembly lives in `scripts/inputs.py`** as `get_inputs_<name>(...)`, one
+  per script, returning a dict that includes its `results_paths` and/or `fig_paths` and the
+  prepared arrays/parameters. Never duplicate path construction.
+- Outputs follow `results/<name>/[<value>/]<output>.csv` and `figures/<topic>/<output>.svg`.
+  Snakemake `output:` lists assume this.
 - Each script has a single public entry point (`run_analyses` / `make_plots`) at the top; every
   other function is `_private` and sits below it. A helper that is a general reusable task (not
   one analysis's step) and is used across scripts belongs in the package instead. Don't factor
@@ -79,8 +84,8 @@ Every analysis is a **script pair**: `scripts/<name>.py` does the heavy compute,
   compile script and the Snakefile. Don't put figure or panel numbers in other scripts'
   docstrings or comments; they go stale on any renumbering.
 
-To add an analysis: write the script pair, add `get_inputs_<name>()` to `inputs.py`, and add
-`<name>_results` + `<name>_plots` rules to the Snakefile.
+To add an analysis or plot script: write it, add its `get_inputs_<name>()` to `inputs.py`, and
+add its rule to the Snakefile.
 
 ## Tests
 
