@@ -315,6 +315,32 @@ def test_bridge_sampling_ssi_matches_prior_sampling(*, toy_inputs):
     )
 
 
+@pytest.mark.parametrize(
+    ("log_evidence_by_model", "prior_probability_by_model", "expected"),
+    [
+        ({"sse": -10.0, "ssi": -10.0}, None, {"sse": 0.5, "ssi": 0.5}),
+        ({"sse": 0.0, "ssi": np.log(3)}, None, {"sse": 0.25, "ssi": 0.75}),
+        # Prior probabilities need not be normalised
+        (
+            {"sse": -10.0, "ssi": -10.0},
+            {"sse": 1.0, "ssi": 3.0},
+            {"sse": 0.25, "ssi": 0.75},
+        ),
+        # Large log evidences don't overflow
+        ({"sse": -1e5, "ssi": -1e5 + np.log(3)}, None, {"sse": 0.25, "ssi": 0.75}),
+    ],
+)
+def test_compute_model_probabilities(
+    *, log_evidence_by_model, prior_probability_by_model, expected
+):
+    model_probability_by_model = evidence.compute_model_probabilities(
+        log_evidence_by_model=log_evidence_by_model,
+        prior_probability_by_model=prior_probability_by_model,
+    )
+    assert model_probability_by_model == pytest.approx(expected)
+    assert list(model_probability_by_model) == list(log_evidence_by_model)
+
+
 def _prior_unconstrained_samples(*, param_names, n_latents, priors, n_samples, rng):
     # Prior samples in the bridge sampling parameterisation (log params, then z)
     columns = []

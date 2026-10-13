@@ -9,15 +9,17 @@ Analysis of the risk of additional cases at the apparent end of an outbreak, acc
 superspreading and symptom-linked infectiousness. A library package drives a Snakemake workflow
 that produces the numerical results and figures.
 
-**Status:** the library (model fitting, risk, evidence and the rolling-fit pipeline) and the
-`model_fits` analysis script exist; there are no plot scripts or Snakemake rules yet. Keep this
-file in step as they land: describe what exists, not what is planned.
+**Status:** the library (model fitting, risk, evidence, the rolling-fit pipeline and
+plotting), the `model_fits` analysis script and the `model_comparison_plots` plot script exist;
+there are no Snakemake rules yet. Keep this file in step as they land: describe what exists,
+not what is planned.
 
 ## Layout
 
 - `src/endoutbreakhet/` — library package (src layout, installed editable by pixi, so edits
-  take effect immediately). `__init__.__all__` is the public API. Modules lead with their
-  public functions; private `_helpers` sit below them. Keep imports between modules one-way,
+  take effect immediately). `__init__.__all__` is the public API, except `plotting`, which
+  scripts import as `endoutbreakhet.plotting` so that importing the package (as every fit
+  worker does) doesn't pull in matplotlib. Modules lead with their public functions; private `_helpers` sit below them. Keep imports between modules one-way,
   with no cycles.
 - `scripts/` — analysis and plot scripts plus shared `inputs.py` (see below). A package at the
   repo root, **not** under `src/`.
@@ -74,7 +76,9 @@ from several analyses or several runs of one (e.g. overlapping sets of model spe
 - **All input/parameter assembly lives in `scripts/inputs.py`** as `get_inputs_<name>(...)`, one
   per script, returning a dict that includes its `results_paths` and/or `fig_paths` and the
   prepared arrays/parameters. Never duplicate path construction.
-- Outputs follow `results/<name>/[<value>/]<output>.csv` and `figures/<topic>/<output>.svg`.
+- Outputs follow `results/<name>/[<value>/]<output>.csv` and
+  `figures/<topic>/[<value>/]<output>.<ext>`, with each figure saved in every format in
+  `FIG_EXTENSIONS` (in `inputs.py`), so `fig_paths` maps each figure to a list of paths.
   Snakemake `output:` lists assume this.
 - Each script has a single public entry point (`run_analyses` / `make_plots`) at the top; every
   other function is `_private` and sits below it. A helper that is a general reusable task (not
@@ -118,9 +122,10 @@ Run format, lint and typecheck after code changes.
   purpose, so don't add other config.
 - New dependencies go in `pyproject.toml` (conda-forge first, `pypi-dependencies` only if
   needed; dev-only tools in the `dev` feature). Commit the updated `pixi.lock`.
-- matplotlib SVG output is non-deterministic (run-varying IDs, float noise), so `git diff
-  figures/` can't show whether a plotting change preserved the output. Check by running the
-  plot script and looking at the figure.
+- matplotlib SVG output is non-deterministic (run-varying IDs, float noise), but PNG output is
+  byte-identical across runs. So after rerunning a plot script, `git status figures/` shows
+  whether a plotting change altered a figure via its PNG; look at the PNG to check the
+  change.
 
 ## Repo
 

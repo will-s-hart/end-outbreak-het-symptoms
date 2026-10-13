@@ -1,6 +1,10 @@
 # Note that AI tools were used to generate tests
+import matplotlib
 import numpy as np
 import pytest
+
+# Non-interactive backend, so plotting tests don't need a display
+matplotlib.use("Agg")
 
 MODEL_NAMES = ["poisson", "sse", "ssi", "dlo", "poisson_so", "sse_so", "ssi_so"]
 

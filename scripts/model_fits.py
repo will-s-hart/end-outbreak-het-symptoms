@@ -6,8 +6,8 @@ from endoutbreakhet import run_pipeline
 from scripts.inputs import MODEL_SPECS, get_inputs_model_fits
 
 
-def run_analyses(*, spec_name):
-    inputs = get_inputs_model_fits(spec_name=spec_name)
+def run_analyses(*, model_spec_name):
+    inputs = get_inputs_model_fits(model_spec_name=model_spec_name)
     outputs = run_pipeline(
         model_name=inputs["model_name"],
         incidence_vec=inputs["incidence_vec"],
@@ -45,4 +45,4 @@ if __name__ == "__main__":
     parser.add_argument("--spec", required=True, choices=MODEL_SPECS)
     args = parser.parse_args()
 
-    run_analyses(spec_name=args.spec)
+    run_analyses(model_spec_name=args.spec)

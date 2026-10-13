@@ -1,4 +1,4 @@
-from endoutbreakhet.evidence import compute_log_evidence
+from endoutbreakhet.evidence import compute_log_evidence, compute_model_probabilities
 from endoutbreakhet.inference import fit_model
 from endoutbreakhet.pipeline import run_pipeline
 from endoutbreakhet.risk import compute_risk
@@ -10,6 +10,7 @@ from endoutbreakhet.utils import (
 
 __all__ = [
     "compute_log_evidence",
+    "compute_model_probabilities",
     "compute_risk",
     "discretise_cori",
     "fit_model",

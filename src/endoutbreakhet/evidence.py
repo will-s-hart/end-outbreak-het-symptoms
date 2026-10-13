@@ -66,6 +66,27 @@ def compute_log_evidence(
     )
 
 
+def compute_model_probabilities(
+    *, log_evidence_by_model, prior_probability_by_model=None
+):
+    # Posterior model probabilities from the log evidences, given prior model probabilities
+    # (uniform if None, and need not be normalised)
+    model_names = list(log_evidence_by_model)
+    log_weights = np.array(
+        [log_evidence_by_model[name] for name in model_names], dtype=float
+    )
+    if prior_probability_by_model is not None:
+        log_weights += np.log(
+            [prior_probability_by_model[name] for name in model_names]
+        )
+    return {
+        name: float(prob)
+        for name, prob in zip(
+            model_names, scipy.special.softmax(log_weights), strict=True
+        )
+    }
+
+
 def _bridge_sampling(
     *,
     posterior_samples,
