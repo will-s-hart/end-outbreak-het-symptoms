@@ -24,6 +24,15 @@ def test_free_rvs(*, model_name, toy_inputs):
     assert {rv.name for rv in model.free_RVs} == expected_names
 
 
+def test_fixed_prior(*, model_name, toy_inputs_fixed_dispersion):
+    # A fixed parameter is a deterministic, not a free variable
+    model = _build_pymc_model(model_name=model_name, **toy_inputs_fixed_dispersion)
+    assert "dispersion" not in {rv.name for rv in model.free_RVs}
+    if model_name not in ("poisson", "poisson_so"):
+        assert "dispersion" in {var.name for var in model.deterministics}
+        assert model["dispersion"].eval() == 0.18
+
+
 def test_observed_days(*, model_name, toy_inputs):
     # Day 0 is imported; force of infection/disease is zero from day 16 (naive) or 17 (SO)
     model = _build_pymc_model(model_name=model_name, **toy_inputs)

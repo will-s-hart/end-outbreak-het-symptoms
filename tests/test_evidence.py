@@ -16,36 +16,47 @@ from endoutbreakhet.utils import parse_lognormal_prior
 _PARAM_NAMES = ["rep_no_before", "rep_no_after", "dispersion"]
 
 
-def test_log_density_matches_pymc(*, model_name, toy_inputs):
+@pytest.mark.parametrize("fixed_dispersion", [False, True])
+def test_log_density_matches_pymc(
+    *, model_name, fixed_dispersion, toy_inputs, toy_inputs_fixed_dispersion
+):
     # Numpy log prior + log likelihood in the bridge sampling parameterisation (log params,
     # z = Phi^-1(u)) against the PyMC model's log density in its sampling parameterisation
     # (log params, logit(u)), corrected by the log Jacobian of logit(u) -> z
-    model = _build_pymc_model(model_name=model_name, **toy_inputs)
-    param_names = [name for name in _PARAM_NAMES if name in model.named_vars]
+    inputs = toy_inputs_fixed_dispersion if fixed_dispersion else toy_inputs
+    model = _build_pymc_model(model_name=model_name, **inputs)
+    free_rv_names = {rv.name for rv in model.free_RVs}
+    estimated_param_names = [name for name in _PARAM_NAMES if name in free_rv_names]
+    fixed_params = {
+        name: inputs["priors"][name]["value"]
+        for name in _PARAM_NAMES
+        if name in model.named_vars and name not in free_rv_names
+    }
     n_latents = (
         model.initial_point()["u_interval__"].size if "u" in model.named_vars else 0
     )
     unconstrained_samples = _prior_unconstrained_samples(
-        param_names=param_names,
+        estimated_param_names=estimated_param_names,
         n_latents=n_latents,
-        priors=toy_inputs["priors"],
+        priors=inputs["priors"],
         n_samples=5,
         rng=np.random.default_rng(0),
     )
 
     log_prior_samples = evidence._log_prior_samples(
         unconstrained_samples=unconstrained_samples,
-        param_names=param_names,
+        estimated_param_names=estimated_param_names,
         has_latents=n_latents > 0,
-        priors=toy_inputs["priors"],
+        priors=inputs["priors"],
     )
     log_likelihood_samples = getattr(evidence, f"_{model_name}_log_likelihood_samples")(
-        incidence_vec=toy_inputs["incidence_vec"],
-        switch_day=toy_inputs["switch_day"],
-        delay_distributions=toy_inputs["delay_distributions"],
+        incidence_vec=inputs["incidence_vec"],
+        switch_day=inputs["switch_day"],
+        delay_distributions=inputs["delay_distributions"],
         **evidence._param_and_latent_samples(
             unconstrained_samples=unconstrained_samples,
-            param_names=param_names,
+            estimated_param_names=estimated_param_names,
+            fixed_params=fixed_params,
             has_latents=n_latents > 0,
         ),
     )
@@ -54,8 +65,10 @@ def test_log_density_matches_pymc(*, model_name, toy_inputs):
     for sample, log_density in zip(
         unconstrained_samples, log_prior_samples + log_likelihood_samples
     ):
-        point = {f"{name}_log__": sample[i] for i, name in enumerate(param_names)}
-        z = sample[len(param_names) :]
+        point = {
+            f"{name}_log__": sample[i] for i, name in enumerate(estimated_param_names)
+        }
+        z = sample[len(estimated_param_names) :]
         log_jacobian = 0.0
         if n_latents:
             log_cdf, log_sf = scipy.stats.norm.logcdf(z), scipy.stats.norm.logsf(z)
@@ -65,18 +78,33 @@ def test_log_density_matches_pymc(*, model_name, toy_inputs):
 
 
 @pytest.mark.parametrize(
-    ("param_names", "n_latents"),
-    [(["rep_no_before", "rep_no_after"], 0), (_PARAM_NAMES, 4)],
+    ("estimated_param_names", "n_latents", "fixed_dispersion"),
+    [
+        (["rep_no_before", "rep_no_after"], 0, False),
+        (_PARAM_NAMES, 4, False),
+        (["rep_no_before", "rep_no_after"], 4, True),
+    ],
 )
 def test_param_layout_and_unconstrained_posterior_samples(
-    *, param_names, n_latents, toy_inputs
+    *,
+    estimated_param_names,
+    n_latents,
+    fixed_dispersion,
+    toy_inputs,
+    toy_inputs_fixed_dispersion,
 ):
     rng = np.random.default_rng(0)
     n_chains, n_draws = 2, 3
     data_vars: dict[str, tuple] = {
         name: (("chain", "draw"), rng.lognormal(size=(n_chains, n_draws)))
-        for name in param_names
+        for name in estimated_param_names
     }
+    if fixed_dispersion:
+        # Fixed parameters are in the trace as deterministics
+        data_vars["dispersion"] = (
+            ("chain", "draw"),
+            np.full((n_chains, n_draws), 0.18),
+        )
     if n_latents:
         data_vars["u"] = (
             ("chain", "draw", "u_dim_0"),
@@ -88,23 +116,30 @@ def test_param_layout_and_unconstrained_posterior_samples(
             rng.gamma(shape=1.0, size=(n_chains, n_draws, n_latents)),
         )
     trace = types.SimpleNamespace(posterior=xr.Dataset(data_vars))
+    inputs = toy_inputs_fixed_dispersion if fixed_dispersion else toy_inputs
 
-    returned_param_names, has_latents = evidence._param_layout(trace=trace)
-    assert returned_param_names == param_names
+    returned_estimated_param_names, fixed_params, has_latents = evidence._param_layout(
+        trace=trace, priors=inputs["priors"]
+    )
+    assert returned_estimated_param_names == estimated_param_names
+    assert fixed_params == ({"dispersion": 0.18} if fixed_dispersion else {})
     assert has_latents == (n_latents > 0)
 
     samples = evidence._unconstrained_posterior_samples(
-        trace=trace, param_names=param_names, has_latents=has_latents
+        trace=trace,
+        estimated_param_names=estimated_param_names,
+        has_latents=has_latents,
     )
-    n_dims = len(param_names) + n_latents
+    n_dims = len(estimated_param_names) + n_latents
     assert samples.shape == (n_chains, n_draws, n_dims)
 
     param_and_latent_samples = evidence._param_and_latent_samples(
         unconstrained_samples=samples.reshape(n_chains * n_draws, n_dims),
-        param_names=param_names,
+        estimated_param_names=estimated_param_names,
+        fixed_params=fixed_params,
         has_latents=has_latents,
     )
-    for name in param_names:
+    for name in [*estimated_param_names, *fixed_params]:
         np.testing.assert_allclose(
             param_and_latent_samples[f"{name}_samples"], data_vars[name][1].ravel()
         )
@@ -163,7 +198,7 @@ def test_unsupported_prior_raises(*, toy_inputs):
     with pytest.raises(ValueError, match="Unsupported prior"):
         evidence._log_prior_samples(
             unconstrained_samples=np.zeros((2, 3)),
-            param_names=_PARAM_NAMES,
+            estimated_param_names=_PARAM_NAMES,
             has_latents=False,
             priors=priors,
         )
@@ -210,16 +245,19 @@ def test_bridge_sampling_gaussian():
     assert abs(result["log_evidence"] - log_normaliser) < 4 * result["log_evidence_se"]
 
 
-def test_bridge_sampling_poisson_matches_quadrature(*, toy_inputs):
-    # The likelihood factorises over days before and after the switch, and the priors are
-    # independent, so the evidence is a product of 1-D integrals over log R and the
-    # posteriors of R before and after the switch are independent (sampled exactly by
-    # inverse transform on a grid)
-    incidence_vec = toy_inputs["incidence_vec"]
+@pytest.mark.parametrize("model_name", ["poisson", "dlo"])
+def test_bridge_sampling_matches_quadrature(*, model_name, toy_inputs_fixed_dispersion):
+    # For the Poisson model, and the DLO model with fixed dispersion, the likelihood
+    # factorises over days before and after the switch, and the priors are independent, so
+    # the evidence is a product of 1-D integrals over log R and the posteriors of R before
+    # and after the switch are independent (sampled exactly by inverse transform on a grid)
+    inputs = toy_inputs_fixed_dispersion
+    dispersion = inputs["priors"]["dispersion"]["value"]
+    incidence_vec = inputs["incidence_vec"]
     n_days = len(incidence_vec)
     total_inf_vec = np.convolve(
         incidence_vec,
-        np.concatenate([[0.0], toy_inputs["delay_distributions"]["serial_interval"]]),
+        np.concatenate([[0.0], inputs["delay_distributions"]["serial_interval"]]),
     )[:n_days]
     days = np.arange(n_days)
     rng = np.random.default_rng(0)
@@ -227,19 +265,25 @@ def test_bridge_sampling_poisson_matches_quadrature(*, toy_inputs):
     log_evidence = 0.0
     posterior = {}
     for name, period_idx in [
-        ("rep_no_before", (total_inf_vec > 0) & (days < toy_inputs["switch_day"])),
-        ("rep_no_after", (total_inf_vec > 0) & (days >= toy_inputs["switch_day"])),
+        ("rep_no_before", (total_inf_vec > 0) & (days < inputs["switch_day"])),
+        ("rep_no_after", (total_inf_vec > 0) & (days >= inputs["switch_day"])),
     ]:
-        prior_params = parse_lognormal_prior(name=name, priors=toy_inputs["priors"])
+        prior_params = parse_lognormal_prior(name=name, priors=inputs["priors"])
         log_rep_no_grid = prior_params["mu"] + prior_params["sigma"] * np.linspace(
             -8, 8, 20001
         )
+        mean = np.exp(log_rep_no_grid)[:, None] * total_inf_vec[period_idx]
+        if model_name == "poisson":
+            log_likelihood = scipy.stats.poisson.logpmf(incidence_vec[period_idx], mean)
+        else:
+            log_likelihood = scipy.stats.nbinom.logpmf(
+                incidence_vec[period_idx],
+                n=dispersion,
+                p=dispersion / (dispersion + mean),
+            )
         log_unnormalised_density = scipy.stats.norm.logpdf(
             log_rep_no_grid, loc=prior_params["mu"], scale=prior_params["sigma"]
-        ) + scipy.stats.poisson.logpmf(
-            incidence_vec[period_idx],
-            np.exp(log_rep_no_grid)[:, None] * total_inf_vec[period_idx],
-        ).sum(axis=-1)
+        ) + log_likelihood.sum(axis=-1)
         log_shift = log_unnormalised_density.max()
         density = np.exp(log_unnormalised_density - log_shift)
         log_evidence += log_shift + np.log(
@@ -252,10 +296,13 @@ def test_bridge_sampling_poisson_matches_quadrature(*, toy_inputs):
                 np.interp(rng.uniform(size=(4, 1000)), cdf / cdf[-1], log_rep_no_grid)
             ),
         )
+    if model_name == "dlo":
+        # Fixed parameters are in the trace as deterministics
+        posterior["dispersion"] = (("chain", "draw"), np.full((4, 1000), dispersion))
 
     result = evidence.compute_log_evidence(
-        model_name="poisson",
-        **toy_inputs,
+        model_name=model_name,
+        **inputs,
         trace=types.SimpleNamespace(posterior=xr.Dataset(posterior)),
         n_proposal_samples=2000,
         rng=rng,
@@ -288,13 +335,14 @@ def test_bridge_sampling_ssi_matches_prior_sampling(*, toy_inputs):
     n_samples = 200_000
     param_and_latent_samples = evidence._param_and_latent_samples(
         unconstrained_samples=_prior_unconstrained_samples(
-            param_names=_PARAM_NAMES,
+            estimated_param_names=_PARAM_NAMES,
             n_latents=trace.posterior["u"].shape[-1],
             priors=toy_inputs["priors"],
             n_samples=n_samples,
             rng=rng,
         ),
-        param_names=_PARAM_NAMES,
+        estimated_param_names=_PARAM_NAMES,
+        fixed_params={},
         has_latents=True,
     )
     log_likelihood_samples = evidence._ssi_log_likelihood_samples(
@@ -341,10 +389,12 @@ def test_compute_model_probabilities(
     assert list(model_probability_by_model) == list(log_evidence_by_model)
 
 
-def _prior_unconstrained_samples(*, param_names, n_latents, priors, n_samples, rng):
+def _prior_unconstrained_samples(
+    *, estimated_param_names, n_latents, priors, n_samples, rng
+):
     # Prior samples in the bridge sampling parameterisation (log params, then z)
     columns = []
-    for name in param_names:
+    for name in estimated_param_names:
         prior_params = parse_lognormal_prior(name=name, priors=priors)
         columns.append(
             rng.normal(

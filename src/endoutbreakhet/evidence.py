@@ -34,21 +34,26 @@ def compute_log_evidence(
     if model_name not in log_likelihood_funcs:
         raise ValueError(f"Unknown model name: {model_name}")
 
-    param_names, has_latents = _param_layout(trace=trace)
+    estimated_param_names, fixed_params, has_latents = _param_layout(
+        trace=trace, priors=priors
+    )
     posterior_samples = _unconstrained_posterior_samples(
-        trace=trace, param_names=param_names, has_latents=has_latents
+        trace=trace,
+        estimated_param_names=estimated_param_names,
+        has_latents=has_latents,
     )
 
     def _log_density(*, unconstrained_samples):
         log_prior_samples = _log_prior_samples(
             unconstrained_samples=unconstrained_samples,
-            param_names=param_names,
+            estimated_param_names=estimated_param_names,
             has_latents=has_latents,
             priors=priors,
         )
         param_and_latent_samples = _param_and_latent_samples(
             unconstrained_samples=unconstrained_samples,
-            param_names=param_names,
+            estimated_param_names=estimated_param_names,
+            fixed_params=fixed_params,
             has_latents=has_latents,
         )
         return log_prior_samples + log_likelihood_funcs[model_name](
@@ -452,50 +457,70 @@ def _ssi_so_log_likelihood_samples(
     ).sum(axis=-1)
 
 
-def _param_layout(*, trace):
-    # Names of the parameters, and whether there are gamma latents, from the variables in
-    # the trace. In the bridge sampling parameterisation, the last axis holds logs of the
-    # parameters, then standard normal samples z = Phi^-1(u) underlying the latents (if any)
-    param_names = [
+def _param_layout(*, trace, priors):
+    # Names of the estimated parameters, values of the fixed parameters, and whether there
+    # are gamma latents, from the variables in the trace (where fixed parameters are
+    # deterministics). In the bridge sampling parameterisation, the last axis holds logs of
+    # the estimated parameters, then standard normal samples z = Phi^-1(u) underlying the
+    # latents (if any)
+    model_param_names = [
         name
         for name in ("rep_no_before", "rep_no_after", "dispersion")
         if name in trace.posterior
     ]
+    fixed_params = {
+        name: priors[name]["value"]
+        for name in model_param_names
+        if priors[name].get("dist", None) == "fixed"
+    }
+    estimated_param_names = [
+        name for name in model_param_names if name not in fixed_params
+    ]
     has_latents = "u" in trace.posterior
-    return param_names, has_latents
+    return estimated_param_names, fixed_params, has_latents
 
 
-def _unconstrained_posterior_samples(*, trace, param_names, has_latents):
+def _unconstrained_posterior_samples(*, trace, estimated_param_names, has_latents):
     # Posterior samples in the bridge sampling parameterisation (see _param_layout), of
     # shape (n_chains, n_draws, n_dims)
     posterior = trace.posterior
-    columns = [np.log(posterior[name].values)[..., None] for name in param_names]
+    columns = [
+        np.log(posterior[name].values)[..., None] for name in estimated_param_names
+    ]
     if has_latents:
         columns.append(scipy.stats.norm.ppf(posterior["u"].values))
     return np.concatenate(columns, axis=-1)
 
 
-def _param_and_latent_samples(*, unconstrained_samples, param_names, has_latents):
+def _param_and_latent_samples(
+    *, unconstrained_samples, estimated_param_names, fixed_params, has_latents
+):
     # Parameter and latent samples, as keyword arguments for the log-likelihood functions,
     # from samples of shape (n_samples, n_dims) in the bridge sampling parameterisation
-    # (see _param_layout)
+    # (see _param_layout), with each fixed parameter's value repeated for every sample
     param_and_latent_samples = {
         f"{name}_samples": np.exp(unconstrained_samples[:, i])
-        for i, name in enumerate(param_names)
+        for i, name in enumerate(estimated_param_names)
     }
+    for name, value in fixed_params.items():
+        param_and_latent_samples[f"{name}_samples"] = np.full(
+            len(unconstrained_samples), value
+        )
     if has_latents:
         param_and_latent_samples["latent_standard_normal_samples"] = (
-            unconstrained_samples[:, len(param_names) :]
+            unconstrained_samples[:, len(estimated_param_names) :]
         )
     return param_and_latent_samples
 
 
-def _log_prior_samples(*, unconstrained_samples, param_names, has_latents, priors):
+def _log_prior_samples(
+    *, unconstrained_samples, estimated_param_names, has_latents, priors
+):
     # Log prior density of samples of shape (n_samples, n_dims) in the bridge sampling
     # parameterisation (see _param_layout). If X ~ LogNormal(mu, sigma) then
     # log X ~ Normal(mu, sigma), and z ~ Normal(0, 1)
     log_prior_samples = np.zeros(len(unconstrained_samples))
-    for i, name in enumerate(param_names):
+    for i, name in enumerate(estimated_param_names):
         prior_params = parse_lognormal_prior(name=name, priors=priors)
         log_prior_samples += scipy.stats.norm.logpdf(
             unconstrained_samples[:, i],
@@ -504,7 +529,7 @@ def _log_prior_samples(*, unconstrained_samples, param_names, has_latents, prior
         )
     if has_latents:
         log_prior_samples += scipy.stats.norm.logpdf(
-            unconstrained_samples[:, len(param_names) :]
+            unconstrained_samples[:, len(estimated_param_names) :]
         ).sum(axis=-1)
     return log_prior_samples
 

@@ -1,5 +1,6 @@
 import numpy as np
 import pymc as pm
+import pytensor.tensor as pt
 
 from endoutbreakhet.utils import (
     delay_matrix,
@@ -303,6 +304,9 @@ def _build_rep_no_vec(*, priors, switch_day, n_days):
 
 
 def _prior_rv(*, name, priors):
+    # A fixed parameter is a deterministic, so it's in the trace like an estimated one
+    if priors[name].get("dist", None) == "fixed":
+        return pm.Deterministic(name, pt.as_tensor(priors[name]["value"]))
     return pm.LogNormal(name, **parse_lognormal_prior(name=name, priors=priors))
 
 

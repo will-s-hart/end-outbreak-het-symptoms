@@ -31,6 +31,14 @@ def toy_inputs():
     }
 
 
+@pytest.fixture
+def toy_inputs_fixed_dispersion(*, toy_inputs):
+    return toy_inputs | {
+        "priors": toy_inputs["priors"]
+        | {"dispersion": {"dist": "fixed", "value": 0.18}}
+    }
+
+
 @pytest.fixture(params=MODEL_NAMES)
 def model_name(*, request):
     return request.param

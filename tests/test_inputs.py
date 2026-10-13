@@ -14,22 +14,7 @@ from scripts.inputs import (
 )
 
 
-@pytest.mark.parametrize(
-    "model_spec_name",
-    [
-        pytest.param(
-            model_spec_name,
-            marks=pytest.mark.xfail(
-                raises=ValueError,
-                strict=True,
-                reason="Fixed dispersion prior not yet supported",
-            ),
-        )
-        if model_spec_name.endswith("_fixed_dispersion")
-        else model_spec_name
-        for model_spec_name in MODEL_SPECS
-    ],
-)
+@pytest.mark.parametrize("model_spec_name", MODEL_SPECS)
 def test_model_specs_build(*, model_spec_name, toy_inputs):
     model_spec = MODEL_SPECS[model_spec_name]
     _build_pymc_model(
