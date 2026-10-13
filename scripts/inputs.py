@@ -77,6 +77,7 @@ FIT_KWARGS = {
 }
 N_EVIDENCE_PROPOSAL_SAMPLES = 1000
 FIG_EXTENSIONS = ("svg", "png")
+DATA_PATH = pathlib.Path("data/equateur_2018_onsets.csv")
 
 COMPARISON_SPECS = {
     "naive_models_fixed_dispersion": {
@@ -139,7 +140,7 @@ def get_inputs_model_fits(*, model_spec_name):
         "fit_kwargs": FIT_KWARGS,
         "n_evidence_proposal_samples": N_EVIDENCE_PROPOSAL_SAMPLES,
         "rng": np.random.default_rng(seed=42),
-        "results_paths": _get_results_paths_model_fits(model_spec_name=model_spec_name),
+        "results_paths": get_results_paths_model_fits(model_spec_name=model_spec_name),
     }
 
 
@@ -152,7 +153,7 @@ def get_inputs_model_comparison_plots(*, comparison_spec_name):
 
     # Keyed by model name, which the plots use to style each model
     results_paths_by_model = {
-        model_spec["model_name"]: _get_results_paths_model_fits(
+        model_spec["model_name"]: get_results_paths_model_fits(
             model_spec_name=model_spec_name
         )
         for model_spec_name, model_spec in model_specs.items()
@@ -178,14 +179,41 @@ def get_inputs_model_comparison_plots(*, comparison_spec_name):
         "priors": priors,
         "param_names": comparison_spec["param_names"],
         "risk_types": comparison_spec["risk_types"],
-        "fig_paths": _get_fig_paths_model_comparison_plots(
+        "fig_paths": get_fig_paths_model_comparison_plots(
             comparison_spec_name=comparison_spec_name
         ),
     }
 
 
+def get_results_paths_model_fits(*, model_spec_name):
+    results_dir = pathlib.Path("results/model_fits") / model_spec_name
+    return {
+        "risk": results_dir / "risk.csv",
+        "evidence": results_dir / "evidence.csv",
+        "posterior": results_dir / "posterior.csv",
+        "trace": results_dir / "trace.nc",
+    }
+
+
+def get_fig_paths_model_comparison_plots(*, comparison_spec_name):
+    # One path per file format for each figure
+    fig_dir = pathlib.Path("figures/model_comparison") / comparison_spec_name
+    fig_names = [
+        *(
+            f"densities_{param_name}"
+            for param_name in COMPARISON_SPECS[comparison_spec_name]["param_names"]
+        ),
+        "model_probabilities",
+        "risk_incidence_overlay",
+    ]
+    return {
+        fig_name: [fig_dir / f"{fig_name}.{ext}" for ext in FIG_EXTENSIONS]
+        for fig_name in fig_names
+    }
+
+
 def _get_shared_inputs():
-    df_data = pd.read_csv("data/equateur_2018_onsets.csv", parse_dates=["date"])
+    df_data = pd.read_csv(DATA_PATH, parse_dates=["date"])
     incidence_vec = df_data["incidence"].to_numpy()
 
     first_case_date = df_data["date"].min()
@@ -243,31 +271,4 @@ def _get_shared_inputs():
         "comparison_day": comparison_day,
         "risk_days": risk_days,
         "delay_distributions": delay_distributions,
-    }
-
-
-def _get_results_paths_model_fits(*, model_spec_name):
-    results_dir = pathlib.Path("results/model_fits") / model_spec_name
-    return {
-        "risk": results_dir / "risk.csv",
-        "evidence": results_dir / "evidence.csv",
-        "posterior": results_dir / "posterior.csv",
-        "trace": results_dir / "trace.nc",
-    }
-
-
-def _get_fig_paths_model_comparison_plots(*, comparison_spec_name):
-    # One path per file format for each figure
-    fig_dir = pathlib.Path("figures/model_comparison") / comparison_spec_name
-    fig_names = [
-        *(
-            f"densities_{param_name}"
-            for param_name in COMPARISON_SPECS[comparison_spec_name]["param_names"]
-        ),
-        "model_probabilities",
-        "risk_incidence_overlay",
-    ]
-    return {
-        fig_name: [fig_dir / f"{fig_name}.{ext}" for ext in FIG_EXTENSIONS]
-        for fig_name in fig_names
     }

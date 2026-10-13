@@ -10,9 +10,9 @@ superspreading and symptom-linked infectiousness. A library package drives a Sna
 that produces the numerical results and figures.
 
 **Status:** the library (model fitting, risk, evidence, the rolling-fit pipeline and
-plotting), the `model_fits` analysis script and the `model_comparison_plots` plot script exist;
-there are no Snakemake rules yet. Keep this file in step as they land: describe what exists,
-not what is planned.
+plotting), the `model_fits` analysis script and the `model_comparison_plots` plot script exist,
+each with Snakemake rules. Keep this file in step as more land: describe what exists, not what
+is planned.
 
 ## Layout
 
@@ -60,10 +60,19 @@ commands** — wire them in as rules.
   for each parameter it takes (e.g. `--spec {spec}`, one job per value). Each plot script gets a
   rule running `pixi run python -m scripts.<topic>_plots`, whose inputs are the results files
   it reads.
+- When the set of outputs depends on the parameter value (as `model_comparison_plots`' figures
+  do), a wildcard rule can't declare them, so define one rule per value in a `for` loop
+  instead (`name:` per value, value passed via `params:`).
+- Rule inputs and outputs come from the path getters imported from `scripts/inputs.py`
+  (calling one with `"{spec}"` gives a wildcard pattern). Don't declare gitignored files such as
+  `trace.nc` as outputs: on a fresh clone their absence would force every job to rerun.
+- Fit rules take `threads: workflow.cores`, since the pipeline parallelises over all cores
+  itself (`n_jobs=-1`).
 - Every rule lists `shared_input_paths` (all package modules, globbed, and `scripts/inputs.py`)
   plus its own script, data files and upstream results as inputs, so a change to shared code
   triggers a rebuild.
-- Add each analysis's output paths to the `results_paths` / `figure_paths` aggregates.
+- Add each analysis's output paths to the `results_paths` / `figure_paths` aggregates, which
+  are built before `rule all` (Snakemake resolves a rule's inputs when it is defined).
 
 ## Analysis vs plotting convention
 
@@ -75,7 +84,9 @@ from several analyses or several runs of one (e.g. overlapping sets of model spe
 - **Plot scripts** `scripts/<topic>_plots.py` only read results (never fit), and make figures.
 - **All input/parameter assembly lives in `scripts/inputs.py`** as `get_inputs_<name>(...)`, one
   per script, returning a dict that includes its `results_paths` and/or `fig_paths` and the
-  prepared arrays/parameters. Never duplicate path construction.
+  prepared arrays/parameters. Those paths come from public `get_results_paths_<name>(...)` /
+  `get_fig_paths_<name>(...)` getters, which the Snakefile also imports, as it does data paths
+  (e.g. `DATA_PATH`). Never duplicate path construction.
 - Outputs follow `results/<name>/[<value>/]<output>.csv` and
   `figures/<topic>/[<value>/]<output>.<ext>`, with each figure saved in every format in
   `FIG_EXTENSIONS` (in `inputs.py`), so `fig_paths` maps each figure to a list of paths.
@@ -88,8 +99,8 @@ from several analyses or several runs of one (e.g. overlapping sets of model spe
   compile script and the Snakefile. Don't put figure or panel numbers in other scripts'
   docstrings or comments; they go stale on any renumbering.
 
-To add an analysis or plot script: write it, add its `get_inputs_<name>()` to `inputs.py`, and
-add its rule to the Snakefile.
+To add an analysis or plot script: write it, add its `get_inputs_<name>()` and path getter to
+`inputs.py`, and add its rule to the Snakefile.
 
 ## Tests
 
