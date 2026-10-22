@@ -66,8 +66,9 @@ commands** — wire them in as rules.
 - Rule inputs and outputs come from the path getters imported from `scripts/inputs.py`
   (calling one with `"{spec}"` gives a wildcard pattern). Don't declare gitignored files such as
   `trace.nc` as outputs: on a fresh clone their absence would force every job to rerun.
-- Fit rules take `threads: workflow.cores`, since the pipeline parallelises over all cores
-  itself (`n_jobs=-1`).
+- Fit rules take `threads: lambda wildcards: workflow.cores`, since the pipeline parallelises
+  over all cores itself (`n_jobs=-1`). It's a callable because `workflow.cores` raises when
+  `--cores` is unset, as under a cluster executor, where `--set-threads` gives the width.
 - Every rule lists `shared_input_paths` (all package modules, globbed, and `scripts/inputs.py`)
   plus its own script, data files and upstream results as inputs, so a change to shared code
   triggers a rebuild.

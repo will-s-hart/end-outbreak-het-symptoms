@@ -49,7 +49,9 @@ rule results:
         results_paths,
 
 
-# Each fit gets the whole machine (the pipeline parallelises over days itself)
+# Each fit gets the whole machine (the pipeline parallelises over days itself). The width is
+# a callable so it is only evaluated per job: workflow.cores raises when --cores is unset, as
+# under a cluster executor, where --set-threads replaces it before it would be called.
 rule model_fits:
     input:
         shared_input_paths,
@@ -59,7 +61,7 @@ rule model_fits:
         model_fits_results_paths(model_spec_name="{spec}"),
     wildcard_constraints:
         spec="|".join(MODEL_SPECS),
-    threads: workflow.cores
+    threads: lambda wildcards: workflow.cores
     shell:
         "pixi run python -m scripts.model_fits --spec {wildcards.spec}"
 

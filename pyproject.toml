@@ -35,6 +35,7 @@ ipywidgets = "*"
 pandas-stubs = "*"
 pytest = "*"
 snakemake = "*"
+snakemake-executor-plugin-slurm = "*"
 ty = "*"
 
 [tool.pixi.environments]
