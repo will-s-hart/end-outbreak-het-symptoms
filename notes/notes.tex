@@ -7,9 +7,12 @@
 \mathrm{dispersion}=#2\right)}
 \newcommand{\GammaDist}[2]{\mathrm{Gamma}\left(\mathrm{shape}=#1,
 \mathrm{rate}=#2\right)}
+\newcommand{\BinomialDist}[2]{\mathrm{Binomial}\left(#1, #2\right)}
 \newcommand{\MultinomialDist}[2]{\mathrm{Multinomial}\left(#1; #2\right)}
 \newcommand{\incPMF}{p^{(\mathrm{inc})}}
 \newcommand{\tostPMF}{p^{(\mathrm{tost})}}
+\newcommand{\incCDF}{F^{(\mathrm{inc})}}
+\newcommand{\tostCDF}{F^{(\mathrm{tost})}}
 \newcommand{\RAC}{\mathrm{RAC}}
 \newcommand{\RAT}{\mathrm{RAT}}
 \newcommand{\NBPMF}[3]{p_{\mathrm{NB}}\left(#1; \mathrm{mean}=#2,
@@ -214,10 +217,10 @@ onsets and parameters, these counts are independent, with
   N^{(\mathrm{rem})}_{t} &\sim
   \PoissonDist{R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}},\\
   \Lambda^{(\mathrm{rem})}_{t}&=\sum_{a=1}^{m_{\mathrm{tost}}}
-  (1-F^{(\mathrm{tost})}_{a-1})C_{t+1-a},\\
+  (1-\tostCDF_{a-1})C_{t+1-a},\\
   N^{(\mathrm{inc})}_{t} &\sim \PoissonDist{\bar N_t^{(\mathrm{inc})}},\\
   \bar N_t^{(\mathrm{inc})} &= \sum_{a=1}^{m_{\mathrm{inc}}}
-  (1-F^{(\mathrm{inc})}_{a-1})\mu_{t+1-a}.
+  (1-\incCDF_{a-1})\mu_{t+1-a}.
 \end{align}
 Poisson splitting leaves independent, unrevealed infection components
 with onset after \(t\); nonnegative TOST prevents these individuals from
@@ -226,7 +229,8 @@ affecting the observed history before onset.
 These counts exclude subsequent descendants, but their joint absence
 is equivalent to no future cases. Hence
 \begin{equation}
-  \RAC(t)=1-\exp\left(-\left(R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}+\bar N_t^{(\mathrm{inc})}\right)\right).
+  \RAC(t)=1-\exp\left(-\left(R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}+\bar
+  N_t^{(\mathrm{inc})}\right)\right).
 \end{equation}
 
 Each incubating individual has its full transmission profile ahead of it,
@@ -243,7 +247,8 @@ Conditioning on the incubating count therefore gives
   &=
   1-\exp\left(-R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}\right)\sum_{j=0}^{\infty}q_{0}^{j}\Prob{N^{(\mathrm{inc})}_{t}=j}\\
   &=
-  1-\exp\left(-\left(R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}+\left(1-q_{0}\right)\bar N_t^{(\mathrm{inc})}\right)\right),
+  1-\exp\left(-\left(R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}+\left(1-q_{0}\right)\bar
+  N_t^{(\mathrm{inc})}\right)\right),
 \end{align}
 where the sum can be evaluated either directly or by noting that this
 is the probability generating function of a Poisson distribution evaluated
@@ -284,16 +289,18 @@ Additionally conditioning on \(Z_\tau\) for \(\tau\leq t\), the counts
   N^{(\mathrm{rem})}_{t} &\sim
   \NBDist{R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}}{k\Lambda^{(\mathrm{rem})}_{t}},\\
   \Lambda^{(\mathrm{rem})}_{t}&=\sum_{a=1}^{m_{\mathrm{tost}}}
-  (1-F^{(\mathrm{tost})}_{a-1})C_{t+1-a},\\
+  (1-\tostCDF_{a-1})C_{t+1-a},\\
   N^{(\mathrm{inc})}_{t} &\sim \PoissonDist{\bar N_t^{(\mathrm{inc})}},\\
   \bar N_t^{(\mathrm{inc})} &= \sum_{a=1}^{m_{\mathrm{inc}}}
-  (1-F^{(\mathrm{inc})}_{a-1})\mu_{t+1-a}.
+  (1-\incCDF_{a-1})\mu_{t+1-a}.
 \end{align}
 
 Then, by similar reasoning to the Poisson-SO model, we have
 \begin{align}
-  \RAC(t)&=1-\left(\frac{k}{k+R^{(\mathrm{fut})}}\right)^{k\Lambda_{t}^{(\mathrm{rem})}}\exp\left(-\bar N_t^{(\mathrm{inc})}\right),\\
-  \RAT(t)&=1-\left(\frac{k}{k+R^{(\mathrm{fut})}}\right)^{k\Lambda_{t}^{(\mathrm{rem})}}\exp\left(-\left(1-q_{0}\right)\bar N_t^{(\mathrm{inc})}\right),
+  \RAC(t)&=1-\left(\frac{k}{k+R^{(\mathrm{fut})}}\right)^{k\Lambda_{t}^{(\mathrm{rem})}}\exp\left(-\bar
+  N_t^{(\mathrm{inc})}\right),\\
+  \RAT(t)&=1-\left(\frac{k}{k+R^{(\mathrm{fut})}}\right)^{k\Lambda_{t}^{(\mathrm{rem})}}\exp\left(-\left(1-q_{0}\right)\bar
+  N_t^{(\mathrm{inc})}\right),
 \end{align}
 where here, since the offspring distribution for future cases is
 \(\NBDist{R^{(\mathrm{fut})}}{k}\), we have
@@ -330,16 +337,18 @@ Additionally conditioning on \(Y_\tau\) for \(\tau\leq t\), the counts
   N^{(\mathrm{rem})}_{t} &\sim
   \PoissonDist{R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}},\\
   \Lambda^{(\mathrm{rem})}_{t}&=\sum_{a=1}^{m_{\mathrm{tost}}}
-  (1-F^{(\mathrm{tost})}_{a-1})Y_{t+1-a},\\
+  (1-\tostCDF_{a-1})Y_{t+1-a},\\
   N^{(\mathrm{inc})}_{t} &\sim \PoissonDist{\bar N_t^{(\mathrm{inc})}},\\
   \bar N_t^{(\mathrm{inc})} &= \sum_{a=1}^{m_{\mathrm{inc}}}
-  (1-F^{(\mathrm{inc})}_{a-1})\mu_{t+1-a}.
+  (1-\incCDF_{a-1})\mu_{t+1-a}.
 \end{align}
 
 Then,
 \begin{align}
-  \RAC(t)&=1-\exp\left(-\left(R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}+\bar N_t^{(\mathrm{inc})}\right)\right),\\
-  \RAT(t)&=1-\exp\left(-\left(R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}+\left(1-q_{0}\right)\bar N_t^{(\mathrm{inc})}\right)\right),
+  \RAC(t)&=1-\exp\left(-\left(R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}+\bar
+  N_t^{(\mathrm{inc})}\right)\right),\\
+  \RAT(t)&=1-\exp\left(-\left(R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}+\left(1-q_{0}\right)\bar
+  N_t^{(\mathrm{inc})}\right)\right),
 \end{align}
 where, integrating out the Gamma infectiousness of each future case,
 \begin{equation}
@@ -347,4 +356,96 @@ where, integrating out the Gamma infectiousness of each future case,
   =\left(\frac{k}{k+R^{(\mathrm{fut})}}\right)^k.
 \end{equation}
 
+\section{Under-reporting}
+
+We now suppose that only a proportion \(\rho\) of cases are reported,
+i.e., we assume that the observed counts satisfy
+\begin{equation}
+  C_t^{(\mathrm{obs})}\mid C_t \sim \BinomialDist{C_t}{\rho},
+\end{equation}
+with unobserved counts \(C_t^{(\mathrm{unobs})}=C_t-C_t^{(\mathrm{obs})}\).
+
+For all models, we account for under-reporting by inferring the
+latent unobserved counts alongside the model parameters (and any
+other latent variables), and add these to the observed counts to
+obtain samples of the total counts. The risk of additional cases and
+transmission is then computed as a posterior average over values at
+each joint posterior sample of the total counts, parameters, and any
+other latent variables.
+
+[Some text on why below useful for sampling]
+
+\subsection{Models with Poisson likelihood}
+
+In the Poisson, Poisson-SO, SSI, SSI-SO and SSE-SO models, the
+distribution of the total case count \(C_t\) conditional on any
+latent infectiousness variables is of form
+\begin{equation}
+  C_t \sim \PoissonDist{M_t}.
+\end{equation}
+In this case, the standard thinning property of Poisson distributions
+implies that the observed and unobserved counts are independent, with
+Poisson distributions
+\begin{align}
+  C_t^{(\mathrm{obs})} &\sim \PoissonDist{\rho M_t},\\
+  C_t^{(\mathrm{unobs})} &\sim \PoissonDist{(1-\rho) M_t}.
+\end{align}
+
+\subsection{Models with negative binomial likelihood}
+
+In the DLO and SSE models, the distribution of the total case count
+\(C_t\) is of form
+\begin{equation}
+  C_t \sim \NBDist{M_t}{r_t}.
+\end{equation}
+In this case, the thinning property of negative binomial
+distributions (see Appendix~\ref{sec:nb-thinning}) implies that the
+observed and unobserved counts follow (not independent) negative
+binomial distributions:
+\begin{align}
+  C_t^{(\mathrm{obs})} &\sim \NBDist{\rho M_t}{r_t},\\
+  C_t^{(\mathrm{unobs})}\mid C_t^{(\mathrm{obs})} &\sim
+  \NBDist{\frac{(1-\rho)M_t(r_t+C_t^{(\mathrm{obs})})}{\rho M_t
+  +r_t}}{r_t+C_t^{(\mathrm{obs})}}.
+\end{align}
+
+\begin{appendix}
+  \section{Thinning of negative binomial distributions}
+  \label{sec:nb-thinning}
+
+  Suppose that \(X\sim\NBDist{M}{r}\), with mass function
+  \begin{equation}
+    \Prob{X=x}=\frac{\Gamma(x+r)}{x!\Gamma(r)}\left(\frac{M}{M+r}\right)^x\left(\frac{r}{M+r}\right)^r,
+  \end{equation}
+  and probability generating function
+  \begin{equation}
+    G_X(z)=\left(1+\frac{M}{r}(1-z)\right)^{-r}.
+  \end{equation}
+  Suppose that \(Y_{1}\mid X\sim\BinomialDist{X}{\rho}\), with
+  \(Y_2=X-Y_1\). We can write this as
+  \begin{equation}
+    Y_1=\sum_{i=1}^{X}B_i,
+  \end{equation}
+  where \(B_i\) are independent Bernoulli random variables with
+  \(\Prob{B_i=1}=\rho\) and probability generating function
+  \(G_B(z)=1-\rho+\rho z\). Then by the standard result for the
+  probability generating function of a random sum, we have
+  \begin{align}
+    G_{Y_1}(z)&=G_X(G_B(z))\\
+    &=\left(1+\frac{\rho M}{r}(1-z)\right)^{-r}.
+  \end{align}
+  Therefore, \(Y_1\sim\NBDist{\rho M}{r}\).
+
+  Now, conditional on \(Y_1=y_1\), Bayes' theorem gives
+  \begin{align}
+    \Prob{Y_2=y_2\mid Y_1=y_1}&=\frac{X=y_1+y_2}{Y_1=y_1}\\
+    &=\frac{\Prob{Y_1=y_1\mid X=y_1+y_2}\Prob{X=y_1+y_2}}{\Prob{Y_1=y_1}}\\
+    &=\frac{\Gamma(y_2+r+y_1)}{y_2!\Gamma(r+y_1)}\left(\frac{(1-\rho)M}{M+r}\right)^{y_2}\left(\frac{\rho
+    M+r}{M+r}\right)^{r+y_{1}}.
+  \end{align}
+  Therefore,
+  \begin{equation}
+    Y_2\mid Y_1\sim\NBDist{\frac{(1-\rho)M(r+Y_1)}{\rho M +r}}{r+Y_1}.
+  \end{equation}
+\end{appendix}
 \end{document}
