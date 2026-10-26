@@ -160,11 +160,11 @@ def test_plot_model_probabilities():
 def test_plot_risk_incidence_overlay(
     *, risk_df_by_model, risk_types, expected_lines, expected_ylabel
 ):
-    incidence_vec = np.arange(60) % 4
+    reported_incidence_vec = np.arange(60) % 4
     vline_days = [34, 70]
     fig = plot_risk_incidence_overlay(
         risk_df_by_model=risk_df_by_model,
-        incidence_vec=incidence_vec,
+        reported_incidence_vec=reported_incidence_vec,
         first_case_date=_FIRST_CASE_DATE,
         risk_types=risk_types,
         vline_days=vline_days,
@@ -194,7 +194,9 @@ def test_plot_risk_incidence_overlay(
     np.testing.assert_allclose(
         [bar.get_x() + bar.get_width() / 2 for bar in bars], np.arange(60)
     )
-    np.testing.assert_array_equal([bar.get_height() for bar in bars], incidence_vec)
+    np.testing.assert_array_equal(
+        [bar.get_height() for bar in bars], reported_incidence_vec
+    )
     assert ax.get_xlim() == (27, 88)
 
 

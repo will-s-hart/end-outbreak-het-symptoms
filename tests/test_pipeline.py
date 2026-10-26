@@ -36,10 +36,10 @@ def test_fits_data_through_each_day(*, pipeline_inputs, monkeypatch):
     fits = []
     evidence_calls = []
 
-    def _paddle_out(*, incidence_vec, rng, **kwargs):
+    def _paddle_out(*, reported_incidence_vec, rng, **kwargs):
         # Stub fit that paddles out but never gets barrelled, just noting the set it saw
-        fits.append({"incidence_vec": incidence_vec, "rng": rng})
-        return types.SimpleNamespace(n_days=len(incidence_vec))
+        fits.append({"reported_incidence_vec": reported_incidence_vec, "rng": rng})
+        return types.SimpleNamespace(n_days=len(reported_incidence_vec))
 
     def _fake_risk(*, trace, risk_type, **kwargs):
         return trace.n_days + {"cases": 0.25, "transmission": 0.5}[risk_type]
@@ -54,13 +54,18 @@ def test_fits_data_through_each_day(*, pipeline_inputs, monkeypatch):
     outputs = pipeline.run_pipeline(**pipeline_inputs, n_jobs=1)
 
     days = [10, 13, 16, 19]
-    padded_incidence_vec = np.concatenate([pipeline_inputs["incidence_vec"], [0, 0]])
+    padded_incidence_vec = np.concatenate(
+        [pipeline_inputs["reported_incidence_vec"], [0, 0]]
+    )
     assert len(fits) == len(days)
     for fit, day in zip(fits, days, strict=True):
         np.testing.assert_array_equal(
-            fit["incidence_vec"], padded_incidence_vec[: day + 1]
+            fit["reported_incidence_vec"], padded_incidence_vec[: day + 1]
         )
-        assert fit["incidence_vec"].dtype == pipeline_inputs["incidence_vec"].dtype
+        assert (
+            fit["reported_incidence_vec"].dtype
+            == pipeline_inputs["reported_incidence_vec"].dtype
+        )
     # Each day rides its own stream of random numbers
     assert len({fit["rng"].random() for fit in fits}) == len(days)
 

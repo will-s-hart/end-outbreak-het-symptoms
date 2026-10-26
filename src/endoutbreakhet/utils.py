@@ -96,11 +96,11 @@ def delay_matrix(*, dist_vec, n_days, first_lag):
     return scipy.linalg.toeplitz(first_col, np.zeros(n_days))
 
 
-def get_likelihood_idx(*, incidence_vec, force_vec):
+def get_likelihood_idx(*, reported_incidence_vec, force_vec):
     # Days with nonzero force of infection/disease. Day-0 cases are imported; later cases
     # are local, so are only possible on these days
     likelihood_idx = force_vec > 0
-    if np.any(incidence_vec[1:][~likelihood_idx[1:]]):
+    if np.any(reported_incidence_vec[1:][~likelihood_idx[1:]]):
         raise ValueError(
             "Local incidence cannot be greater than zero when force of "
             "infection/disease is 0."

@@ -113,7 +113,7 @@ Assuming that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\), we have
 
 Assuming that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\), we have
 \begin{align}
-  \RAC(t)&=
+  \RAC(t)&=\RAT(t)=
   1-\prod_{\tau=t+1}^{t+m}{\left(\frac{k}{k+R^{(\mathrm{fut})}\sum_{s=\tau-t}^{m}
   C_{\tau-s} w_s}\right)}^{k}.
 \end{align}
@@ -141,7 +141,7 @@ Assuming that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\), we have
 
 Assuming that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\), we have
 \begin{align}
-  \RAC(t)&=
+  \RAC(t)&=\RAT(t)=
   1-{\left(\frac{k}{k+R^{(\mathrm{fut})}}\right)}^{k\Lambda^{(\mathrm{rem})}_{t}},\\
   \Lambda^{(\mathrm{rem})}_{t} &= \sum_{a=1}^{m} (1-F_{a-1}^{(w)})C_{t+1-a}.
 \end{align}
@@ -358,59 +358,85 @@ where, integrating out the Gamma infectiousness of each future case,
 
 \section{Under-reporting}
 
-We now suppose that only a proportion \(\rho\) of cases are reported,
-i.e., we assume that the observed counts satisfy
+We now suppose that each case is reported independently with known
+probability \(\rho\in(0,1]\), so that only the reported counts
+\(C_t^{(\mathrm{obs})}\) are observed, with
 \begin{equation}
   C_t^{(\mathrm{obs})}\mid C_t \sim \BinomialDist{C_t}{\rho},
 \end{equation}
-with unobserved counts \(C_t^{(\mathrm{unobs})}=C_t-C_t^{(\mathrm{obs})}\).
+and unreported counts \(C_t^{(\mathrm{unobs})}=C_t-C_t^{(\mathrm{obs})}\).
+The imported cases on the first day are conditioned on and taken to be
+all reported. Unreported cases transmit as reported cases do,
+so the models above describe the total counts \(C_t\): infectiousness,
+and the infectiousness latents \(Y_t\) and \(Z_t\), depend on total rather
+than reported counts, and the history on which each distributional
+statement conditions includes earlier unreported counts.
 
-For all models, we account for under-reporting by inferring the
-latent unobserved counts alongside the model parameters (and any
-other latent variables), and add these to the observed counts to
-obtain samples of the total counts. The risk of additional cases and
-transmission is then computed as a posterior average over values at
-each joint posterior sample of the total counts, parameters, and any
-other latent variables.
+\subsection{Inference}
 
-[Some text on why below useful for sampling]
+For each day \(t\) after the first, \(C_t\) follows the model's
+distribution given the history, and \(C_t^{(\mathrm{obs})}\mid C_t\) is
+binomial as above. The unreported counts enter infectiousness on later days,
+so they cannot be integrated out in closed form. We therefore infer them
+alongside the model parameters and any infectiousness latents, sampling
+from the joint posterior of these quantities given the reported counts.
+Since unreported cases are possible on any day with nonzero infectiousness,
+the infectiousness latents are needed on every day, rather than only on
+days with reported cases (SSI and SSI-SO models) or nonzero infectiousness
+from reported cases (SSE-SO model). They are zero on days where their Gamma
+shape is zero.
 
-\subsection{Models with Poisson likelihood}
+The risks of additional cases and transmission refer to all cases, reported
+or not. They are given by the expressions in the previous sections with
+total counts (and the corresponding infectiousness latents), so they are
+computed at each joint posterior sample and averaged over the posterior.
 
-In the Poisson, Poisson-SO, SSI, SSI-SO and SSE-SO models, the
-distribution of the total case count \(C_t\) conditional on any
-latent infectiousness variables is of form
-\begin{equation}
-  C_t \sim \PoissonDist{M_t}.
-\end{equation}
-In this case, the standard thinning property of Poisson distributions
-implies that the observed and unobserved counts are independent, with
-Poisson distributions
-\begin{align}
-  C_t^{(\mathrm{obs})} &\sim \PoissonDist{\rho M_t},\\
-  C_t^{(\mathrm{unobs})} &\sim \PoissonDist{(1-\rho) M_t}.
-\end{align}
-
-\subsection{Models with negative binomial likelihood}
-
-In the DLO and SSE models, the distribution of the total case count
-\(C_t\) is of form
-\begin{equation}
-  C_t \sim \NBDist{M_t}{r_t}.
-\end{equation}
-In this case, the thinning property of negative binomial
-distributions (see Appendix~\ref{sec:nb-thinning}) implies that the
-observed and unobserved counts follow (not independent) negative
-binomial distributions:
-\begin{align}
-  C_t^{(\mathrm{obs})} &\sim \NBDist{\rho M_t}{r_t},\\
-  C_t^{(\mathrm{unobs})}\mid C_t^{(\mathrm{obs})} &\sim
-  \NBDist{\frac{(1-\rho)M_t(r_t+C_t^{(\mathrm{obs})})}{\rho M_t
-  +r_t}}{r_t+C_t^{(\mathrm{obs})}}.
-\end{align}
+Appendix~\ref{sec:factorisation} gives an equivalent factorisation of each
+day's contribution into reported and unreported counts.
 
 \begin{appendix}
-  \section{Thinning of negative binomial distributions}
+  \section{Factorisation of reported and unreported counts}
+  \label{sec:factorisation}
+
+  The contribution of each day to the joint distribution can equivalently be
+  factorised into a distribution for the reported count and a conditional
+  distribution for the unreported count, both given the history. This gives
+  the same posterior. It does not integrate out the unreported counts, since
+  infectiousness on later days still depends on them.
+
+  \subsection{Models with Poisson case counts}
+
+  In the Poisson, Poisson-SO, SSI, SSI-SO and SSE-SO models, \(C_t\) given
+  the history (including any infectiousness latents) is of form
+  \begin{equation}
+    C_t \sim \PoissonDist{M_t}.
+  \end{equation}
+  By the thinning property of Poisson distributions, the reported and
+  unreported counts given the history are then independent, with
+  \begin{align}
+    C_t^{(\mathrm{obs})} &\sim \PoissonDist{\rho M_t},\\
+    C_t^{(\mathrm{unobs})} &\sim \PoissonDist{(1-\rho) M_t}.
+  \end{align}
+
+  \subsection{Models with negative binomial case counts}
+
+  In the DLO and SSE models, \(C_t\) given the history is of form
+  \begin{equation}
+    C_t \sim \NBDist{M_t}{r_t},
+  \end{equation}
+  with \(r_t=k\) (DLO model) or \(r_t=k\lambda_t\) (SSE model). By the
+  thinning property of negative binomial distributions (see
+  Appendix~\ref{sec:nb-thinning}), the reported and unreported counts given
+  the history are then dependent, with
+  \begin{align}
+    C_t^{(\mathrm{obs})} &\sim \NBDist{\rho M_t}{r_t},\\
+    C_t^{(\mathrm{unobs})}\mid C_t^{(\mathrm{obs})} &\sim
+    \NBDist{\frac{(1-\rho)M_t(r_t+C_t^{(\mathrm{obs})})}{\rho M_t
+    +r_t}}{r_t+C_t^{(\mathrm{obs})}}.
+  \end{align}
+  In the SSE model, both are point masses at zero when \(\lambda_t=0\).
+
+  \subsection{Thinning of negative binomial distributions}
   \label{sec:nb-thinning}
 
   Suppose that \(X\sim\NBDist{M}{r}\), with mass function
@@ -421,31 +447,31 @@ binomial distributions:
   \begin{equation}
     G_X(z)=\left(1+\frac{M}{r}(1-z)\right)^{-r}.
   \end{equation}
-  Suppose that \(Y_{1}\mid X\sim\BinomialDist{X}{\rho}\), with
-  \(Y_2=X-Y_1\). We can write this as
+  Suppose that \(X_{1}\mid X\sim\BinomialDist{X}{\rho}\), with
+  \(X_2=X-X_1\). We can write this as
   \begin{equation}
-    Y_1=\sum_{i=1}^{X}B_i,
+    X_1=\sum_{i=1}^{X}B_i,
   \end{equation}
   where \(B_i\) are independent Bernoulli random variables with
   \(\Prob{B_i=1}=\rho\) and probability generating function
   \(G_B(z)=1-\rho+\rho z\). Then by the standard result for the
   probability generating function of a random sum, we have
   \begin{align}
-    G_{Y_1}(z)&=G_X(G_B(z))\\
+    G_{X_1}(z)&=G_X(G_B(z))\\
     &=\left(1+\frac{\rho M}{r}(1-z)\right)^{-r}.
   \end{align}
-  Therefore, \(Y_1\sim\NBDist{\rho M}{r}\).
+  Therefore, \(X_1\sim\NBDist{\rho M}{r}\).
 
-  Now, conditional on \(Y_1=y_1\), Bayes' theorem gives
+  Now, conditional on \(X_1=x_1\), Bayes' theorem gives
   \begin{align}
-    \Prob{Y_2=y_2\mid Y_1=y_1}&=\frac{X=y_1+y_2}{Y_1=y_1}\\
-    &=\frac{\Prob{Y_1=y_1\mid X=y_1+y_2}\Prob{X=y_1+y_2}}{\Prob{Y_1=y_1}}\\
-    &=\frac{\Gamma(y_2+r+y_1)}{y_2!\Gamma(r+y_1)}\left(\frac{(1-\rho)M}{M+r}\right)^{y_2}\left(\frac{\rho
-    M+r}{M+r}\right)^{r+y_{1}}.
+    \Prob{X_2=x_2\mid X_1=x_1}&=\Prob{X=x_1+x_2\mid X_1=x_1}\\
+    &=\frac{\Prob{X_1=x_1\mid X=x_1+x_2}\Prob{X=x_1+x_2}}{\Prob{X_1=x_1}}\\
+    &=\frac{\Gamma(x_2+r+x_1)}{x_2!\Gamma(r+x_1)}\left(\frac{(1-\rho)M}{M+r}\right)^{x_2}\left(\frac{\rho
+    M+r}{M+r}\right)^{r+x_{1}}.
   \end{align}
   Therefore,
   \begin{equation}
-    Y_2\mid Y_1\sim\NBDist{\frac{(1-\rho)M(r+Y_1)}{\rho M +r}}{r+Y_1}.
+    X_2\mid X_1\sim\NBDist{\frac{(1-\rho)M(r+X_1)}{\rho M +r}}{r+X_1}.
   \end{equation}
 \end{appendix}
 \end{document}

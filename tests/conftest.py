@@ -14,7 +14,7 @@ def toy_inputs():
     # Last case on day 11, so force of infection (lags 1-4) is zero from day 16 and force
     # of disease (lags 1-5) is zero from day 17
     return {
-        "incidence_vec": np.array(
+        "reported_incidence_vec": np.array(
             [2, 1, 3, 2, 4, 1, 2, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0]
         ),
         "switch_day": 6,
@@ -37,6 +37,11 @@ def toy_inputs_fixed_dispersion(*, toy_inputs):
         "priors": toy_inputs["priors"]
         | {"dispersion": {"dist": "fixed", "value": 0.18}}
     }
+
+
+@pytest.fixture
+def toy_inputs_under_reporting(*, toy_inputs):
+    return toy_inputs | {"reporting_prob": 0.5}
 
 
 @pytest.fixture(params=MODEL_NAMES)

@@ -52,7 +52,7 @@ def make_plots(*, comparison_spec_name):
     }
     risk_incidence_overlay_fig = plot_risk_incidence_overlay(
         risk_df_by_model=risk_df_by_model,
-        incidence_vec=inputs["incidence_vec"],
+        reported_incidence_vec=inputs["reported_incidence_vec"],
         first_case_date=inputs["first_case_date"],
         risk_types=inputs["risk_types"],
         vline_days=[inputs["ert_days"]["arrival"], inputs["ert_days"]["departure"]],

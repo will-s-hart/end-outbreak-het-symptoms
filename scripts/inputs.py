@@ -214,7 +214,7 @@ def get_fig_paths_model_comparison_plots(*, comparison_spec_name):
 
 def _get_shared_inputs():
     df_data = pd.read_csv(DATA_PATH, parse_dates=["date"])
-    incidence_vec = df_data["incidence"].to_numpy()
+    reported_incidence_vec = df_data["incidence"].to_numpy()
 
     first_case_date = df_data["date"].min()
     ert_arrival_date = pd.to_datetime("2018-05-8")
@@ -264,7 +264,7 @@ def _get_shared_inputs():
     }
 
     return {
-        "incidence_vec": incidence_vec,
+        "reported_incidence_vec": reported_incidence_vec,
         "first_case_date": first_case_date,
         "ert_days": ert_days,
         "switch_day": switch_day,

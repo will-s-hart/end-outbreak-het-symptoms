@@ -108,7 +108,7 @@ def plot_model_probabilities(*, model_probability_by_model):
 def plot_risk_incidence_overlay(
     *,
     risk_df_by_model,
-    incidence_vec,
+    reported_incidence_vec,
     first_case_date,
     risk_types=("cases",),
     vline_days=(),
@@ -145,9 +145,12 @@ def plot_risk_incidence_overlay(
     )
     twin_ax = ax.twinx()
     twin_ax.bar(
-        x=np.arange(len(incidence_vec)), height=incidence_vec, color="black", alpha=0.5
+        x=np.arange(len(reported_incidence_vec)),
+        height=reported_incidence_vec,
+        color="black",
+        alpha=0.5,
     )
-    twin_ax.set_ylim(0, np.max(incidence_vec))
+    twin_ax.set_ylim(0, np.max(reported_incidence_vec))
     twin_ax.set_ylabel("Number of cases")
     twin_ax.yaxis.label.set_color("tab:gray")
     twin_ax.tick_params(axis="y", colors="tab:gray")

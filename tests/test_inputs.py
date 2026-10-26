@@ -19,10 +19,11 @@ def test_model_specs_build(*, model_spec_name, toy_inputs):
     model_spec = MODEL_SPECS[model_spec_name]
     _build_pymc_model(
         model_name=model_spec["model_name"],
-        incidence_vec=toy_inputs["incidence_vec"],
+        reported_incidence_vec=toy_inputs["reported_incidence_vec"],
         switch_day=toy_inputs["switch_day"],
         delay_distributions=toy_inputs["delay_distributions"],
         priors=model_spec["priors"],
+        reporting_prob=1.0,
     )
 
 

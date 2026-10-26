@@ -21,11 +21,10 @@ def risk_inputs(*, toy_inputs):
 @pytest.mark.parametrize("final_day", [1, 5, 11, 14, 15])
 @pytest.mark.parametrize("model_name", ["poisson", "dlo", "sse", "ssi"])
 def test_naive_risk_matches_notes(*, model_name, final_day, risk_inputs):
-    incidence_vec = risk_inputs["incidence_vec"][: final_day + 1]
-    n_days = len(incidence_vec)
+    reported_incidence_vec = risk_inputs["reported_incidence_vec"][: final_day + 1]
+    n_days = len(reported_incidence_vec)
     serial_interval = risk_inputs["delay_distributions"]["serial_interval"]
     max_lag = len(serial_interval)
-    nonzero_incidence_idx = incidence_vec > 0
     n_chains, n_draws = 2, 50
     rng = np.random.default_rng(0)
     posterior = xr.Dataset(
@@ -34,26 +33,24 @@ def test_naive_risk_matches_notes(*, model_name, final_day, risk_inputs):
             for name in ["rep_no_before", "rep_no_after", "dispersion"]
         }
         | {
-            "cohort_inf_case_days": (
-                ("chain", "draw", "cohort_inf_case_days_dim_0"),
-                rng.gamma(
-                    shape=1.0, size=(n_chains, n_draws, nonzero_incidence_idx.sum())
-                ),
+            # Zero on days without cases, as in the model
+            "cohort_inf": (
+                ("chain", "draw", "day"),
+                rng.gamma(shape=1.0, size=(n_chains, n_draws, n_days))
+                * (reported_incidence_vec > 0),
             )
         }
     )
     rep_no = posterior["rep_no_before"].values
     dispersion = posterior["dispersion"].values
 
-    # Infectiousness of each day's cases: C_t, or in SSI the latent Y_t (zero on days
-    # without cases)
+    # Infectiousness of each day's cases: C_t, or in SSI the latent Y_t
     if model_name == "ssi":
-        inf_vec_samples = np.zeros((n_chains, n_draws, n_days))
-        inf_vec_samples[..., nonzero_incidence_idx] = posterior[
-            "cohort_inf_case_days"
-        ].values
+        inf_vec_samples = posterior["cohort_inf"].values
     else:
-        inf_vec_samples = np.broadcast_to(incidence_vec, (n_chains, n_draws, n_days))
+        inf_vec_samples = np.broadcast_to(
+            reported_incidence_vec, (n_chains, n_draws, n_days)
+        )
     # Notes' infectiousness on each future day tau from cases up to final_day, and its sum
     remaining_inf_by_day = [
         sum(
@@ -86,7 +83,7 @@ def test_naive_risk_matches_notes(*, model_name, final_day, risk_inputs):
     results = {
         risk_type: risk.compute_risk(
             model_name=model_name,
-            **(risk_inputs | {"incidence_vec": incidence_vec}),
+            **(risk_inputs | {"reported_incidence_vec": reported_incidence_vec}),
             trace=types.SimpleNamespace(posterior=posterior),
             risk_type=risk_type,
         )
@@ -104,8 +101,8 @@ def test_naive_risk_matches_notes(*, model_name, final_day, risk_inputs):
 @pytest.mark.parametrize("risk_type", ["cases", "transmission"])
 @pytest.mark.parametrize("model_name", ["poisson_so", "sse_so", "ssi_so"])
 def test_so_risk_matches_notes(*, model_name, risk_type, final_day, risk_inputs):
-    incidence_vec = risk_inputs["incidence_vec"][: final_day + 1]
-    n_days = len(incidence_vec)
+    reported_incidence_vec = risk_inputs["reported_incidence_vec"][: final_day + 1]
+    n_days = len(reported_incidence_vec)
     switch_day = risk_inputs["switch_day"]
     tost = risk_inputs["delay_distributions"]["tost"]
     inc_period = risk_inputs["delay_distributions"]["inc_period"]
@@ -121,10 +118,8 @@ def test_so_risk_matches_notes(*, model_name, risk_type, final_day, risk_inputs)
         )
 
     expected_total_inf_vec = np.array(
-        [tost_sum(x_vec=incidence_vec, t=t) for t in range(n_days)]
+        [tost_sum(x_vec=reported_incidence_vec, t=t) for t in range(n_days)]
     )
-    nonzero_incidence_idx = incidence_vec > 0
-    nonzero_total_inf_idx = expected_total_inf_vec > 0
     n_chains, n_draws = 2, 50
     rng = np.random.default_rng(0)
     posterior = xr.Dataset(
@@ -133,13 +128,14 @@ def test_so_risk_matches_notes(*, model_name, risk_type, final_day, risk_inputs)
             for name in ["rep_no_before", "rep_no_after", "dispersion"]
         }
         | {
+            # Zero where their mean is, as in the model
             name: (
-                ("chain", "draw", f"{name}_dim_0"),
-                rng.gamma(shape=1.0, size=(n_chains, n_draws, nonzero_idx.sum())),
+                ("chain", "draw", "day"),
+                rng.gamma(shape=1.0, size=(n_chains, n_draws, n_days)) * (mean_vec > 0),
             )
-            for name, nonzero_idx in [
-                ("cohort_inf_case_days", nonzero_incidence_idx),
-                ("total_inf_nonzero_days", nonzero_total_inf_idx),
+            for name, mean_vec in [
+                ("cohort_inf", reported_incidence_vec),
+                ("total_inf", expected_total_inf_vec),
             ]
         }
     )
@@ -147,24 +143,16 @@ def test_so_risk_matches_notes(*, model_name, risk_type, final_day, risk_inputs)
     rep_no_after = posterior["rep_no_after"].values
     dispersion = posterior["dispersion"].values
 
-    # Infectiousness of each day's cases: C_t, or in SSI-SO the latent Y_t (zero on days
-    # without cases)
+    # Infectiousness of each day's cases: C_t, or in SSI-SO the latent Y_t
     if model_name == "ssi_so":
-        cohort_inf_vec_samples = np.zeros((n_chains, n_draws, n_days))
-        cohort_inf_vec_samples[..., nonzero_incidence_idx] = posterior[
-            "cohort_inf_case_days"
-        ].values
+        cohort_inf_vec_samples = posterior["cohort_inf"].values
     else:
         cohort_inf_vec_samples = np.broadcast_to(
-            incidence_vec, (n_chains, n_draws, n_days)
+            reported_incidence_vec, (n_chains, n_draws, n_days)
         )
-    # Total infectiousness on each day: lambda_t, or in SSE-SO the latent Z_t (zero on days
-    # with lambda_t = 0)
+    # Total infectiousness on each day: lambda_t, or in SSE-SO the latent Z_t
     if model_name == "sse_so":
-        total_inf_vec_samples = np.zeros((n_chains, n_draws, n_days))
-        total_inf_vec_samples[..., nonzero_total_inf_idx] = posterior[
-            "total_inf_nonzero_days"
-        ].values
+        total_inf_vec_samples = posterior["total_inf"].values
     else:
         total_inf_vec_samples = np.stack(
             [tost_sum(x_vec=cohort_inf_vec_samples, t=t) for t in range(n_days)],
@@ -207,7 +195,7 @@ def test_so_risk_matches_notes(*, model_name, risk_type, final_day, risk_inputs)
 
     result = risk.compute_risk(
         model_name=model_name,
-        **(risk_inputs | {"incidence_vec": incidence_vec}),
+        **(risk_inputs | {"reported_incidence_vec": reported_incidence_vec}),
         trace=types.SimpleNamespace(posterior=posterior),
         risk_type=risk_type,
     )
@@ -222,16 +210,11 @@ def test_sse_so_risk_before_first_infectious_day(*, risk_type):
             name: (("chain", "draw"), np.ones((2, 3)))
             for name in ("rep_no_before", "rep_no_after", "dispersion")
         }
-        | {
-            "total_inf_nonzero_days": (
-                ("chain", "draw", "total_inf_nonzero_days_dim_0"),
-                np.empty((2, 3, 0)),
-            )
-        }
+        | {"total_inf": (("chain", "draw", "day"), np.zeros((2, 3, 1)))}
     )
     result = risk.compute_risk(
         model_name="sse_so",
-        incidence_vec=np.array([1]),
+        reported_incidence_vec=np.array([1]),
         switch_day=0,
         delay_distributions={
             "tost": np.array([0.0, 1.0]),
@@ -243,6 +226,23 @@ def test_sse_so_risk_before_first_infectious_day(*, risk_type):
     assert result == pytest.approx(0.5)
 
 
+def test_under_reporting_raises(*, risk_inputs):
+    posterior = xr.Dataset(
+        {
+            "unreported_incidence": (
+                ("chain", "draw", "local_day"),
+                np.zeros((1, 1, 17), int),
+            )
+        }
+    )
+    with pytest.raises(NotImplementedError, match="under-reporting"):
+        risk.compute_risk(
+            model_name="poisson",
+            **risk_inputs,
+            trace=types.SimpleNamespace(posterior=posterior),
+        )
+
+
 @pytest.mark.parametrize("risk_type", ["cases", "transmission"])
 def test_zero_incidence_has_zero_risk(*, model_name, risk_type, risk_inputs):
     posterior = xr.Dataset(
@@ -251,14 +251,22 @@ def test_zero_incidence_has_zero_risk(*, model_name, risk_type, risk_inputs):
             for name in ("rep_no_before", "rep_no_after", "dispersion")
         }
         | {
-            name: (("chain", "draw", f"{name}_dim_0"), np.empty((2, 3, 0)))
-            for name in ("cohort_inf_case_days", "total_inf_nonzero_days")
+            name: (
+                ("chain", "draw", "day"),
+                np.zeros((2, 3, len(risk_inputs["reported_incidence_vec"]))),
+            )
+            for name in ("cohort_inf", "total_inf")
         }
     )
     result = risk.compute_risk(
         model_name=model_name,
         **(
-            risk_inputs | {"incidence_vec": np.zeros_like(risk_inputs["incidence_vec"])}
+            risk_inputs
+            | {
+                "reported_incidence_vec": np.zeros_like(
+                    risk_inputs["reported_incidence_vec"]
+                )
+            }
         ),
         trace=types.SimpleNamespace(posterior=posterior),
         risk_type=risk_type,
@@ -280,8 +288,8 @@ def test_so_risk_with_only_lag_zero_tost(*, model_name, risk_type):
             )
         }
         | {
-            name: (("chain", "draw", f"{name}_dim_0"), np.full((2, 3, 1), 1.5))
-            for name in ("cohort_inf_case_days", "total_inf_nonzero_days")
+            name: (("chain", "draw", "day"), np.full((2, 3, 1), 1.5))
+            for name in ("cohort_inf", "total_inf")
         }
     )
     # All transmission by the two seeds occurs today, under rep_no_after. All resulting
@@ -297,7 +305,7 @@ def test_so_risk_with_only_lag_zero_tost(*, model_name, risk_type):
 
     result = risk.compute_risk(
         model_name=model_name,
-        incidence_vec=np.array([2]),
+        reported_incidence_vec=np.array([2]),
         switch_day=0,
         delay_distributions={"tost": np.array([1.0]), "inc_period": np.array([1.0])},
         trace=types.SimpleNamespace(posterior=posterior),

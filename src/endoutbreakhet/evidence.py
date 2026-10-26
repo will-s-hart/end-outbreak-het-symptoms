@@ -14,7 +14,7 @@ from endoutbreakhet.utils import (
 def compute_log_evidence(
     *,
     model_name,
-    incidence_vec,
+    reported_incidence_vec,
     switch_day,
     delay_distributions,
     priors,
@@ -33,31 +33,33 @@ def compute_log_evidence(
     }
     if model_name not in log_likelihood_funcs:
         raise ValueError(f"Unknown model name: {model_name}")
+    if "unreported_incidence" in trace.posterior:
+        raise NotImplementedError("Evidence with under-reporting is not implemented")
 
-    estimated_param_names, fixed_params, has_latents = _param_layout(
+    estimated_param_names, fixed_params, latent_days = _param_layout(
         trace=trace, priors=priors
     )
     posterior_samples = _unconstrained_posterior_samples(
         trace=trace,
         estimated_param_names=estimated_param_names,
-        has_latents=has_latents,
+        latent_days=latent_days,
     )
 
     def _log_density(*, unconstrained_samples):
         log_prior_samples = _log_prior_samples(
             unconstrained_samples=unconstrained_samples,
             estimated_param_names=estimated_param_names,
-            has_latents=has_latents,
+            latent_days=latent_days,
             priors=priors,
         )
         param_and_latent_samples = _param_and_latent_samples(
             unconstrained_samples=unconstrained_samples,
             estimated_param_names=estimated_param_names,
             fixed_params=fixed_params,
-            has_latents=has_latents,
+            latent_days=latent_days,
         )
         return log_prior_samples + log_likelihood_funcs[model_name](
-            incidence_vec=incidence_vec,
+            reported_incidence_vec=reported_incidence_vec,
             switch_day=switch_day,
             delay_distributions=delay_distributions,
             **param_and_latent_samples,
@@ -182,19 +184,19 @@ def _bridge_sampling(
 
 def _poisson_log_likelihood_samples(
     *,
-    incidence_vec,
+    reported_incidence_vec,
     switch_day,
     delay_distributions,
     rep_no_before_samples,
     rep_no_after_samples,
 ):
-    n_days = len(incidence_vec)
+    n_days = len(reported_incidence_vec)
     serial_interval_matrix = delay_matrix(
         dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
     )
-    total_inf_vec = serial_interval_matrix @ incidence_vec
+    total_inf_vec = serial_interval_matrix @ reported_incidence_vec
     likelihood_idx = get_likelihood_idx(
-        incidence_vec=incidence_vec, force_vec=total_inf_vec
+        reported_incidence_vec=reported_incidence_vec, force_vec=total_inf_vec
     )
 
     rep_no_vec_samples = get_rep_no_vec_samples(
@@ -207,27 +209,27 @@ def _poisson_log_likelihood_samples(
     expected_incidence_local_samples = rep_no_vec_samples * total_inf_vec
 
     return scipy.stats.poisson.logpmf(
-        k=incidence_vec[likelihood_idx],
+        k=reported_incidence_vec[likelihood_idx],
         mu=expected_incidence_local_samples[:, likelihood_idx],
     ).sum(axis=-1)
 
 
 def _sse_log_likelihood_samples(
     *,
-    incidence_vec,
+    reported_incidence_vec,
     switch_day,
     delay_distributions,
     rep_no_before_samples,
     rep_no_after_samples,
     dispersion_samples,
 ):
-    n_days = len(incidence_vec)
+    n_days = len(reported_incidence_vec)
     serial_interval_matrix = delay_matrix(
         dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
     )
-    total_inf_vec = serial_interval_matrix @ incidence_vec
+    total_inf_vec = serial_interval_matrix @ reported_incidence_vec
     likelihood_idx = get_likelihood_idx(
-        incidence_vec=incidence_vec, force_vec=total_inf_vec
+        reported_incidence_vec=reported_incidence_vec, force_vec=total_inf_vec
     )
 
     rep_no_vec_samples = get_rep_no_vec_samples(
@@ -240,7 +242,7 @@ def _sse_log_likelihood_samples(
     expected_incidence_local_samples = rep_no_vec_samples * total_inf_vec
 
     return _nbinom_logpmf(
-        k=incidence_vec[likelihood_idx],
+        k=reported_incidence_vec[likelihood_idx],
         mean=expected_incidence_local_samples[:, likelihood_idx],
         dispersion=dispersion_samples[:, None] * total_inf_vec[likelihood_idx],
     ).sum(axis=-1)
@@ -248,22 +250,23 @@ def _sse_log_likelihood_samples(
 
 def _ssi_log_likelihood_samples(
     *,
-    incidence_vec,
+    reported_incidence_vec,
     switch_day,
     delay_distributions,
     rep_no_before_samples,
     rep_no_after_samples,
     dispersion_samples,
+    latent_days,
     latent_standard_normal_samples,
 ):
-    n_days = len(incidence_vec)
+    n_days = len(reported_incidence_vec)
     serial_interval_matrix = delay_matrix(
         dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
     )
     likelihood_idx = get_likelihood_idx(
-        incidence_vec=incidence_vec, force_vec=serial_interval_matrix @ incidence_vec
+        reported_incidence_vec=reported_incidence_vec,
+        force_vec=serial_interval_matrix @ reported_incidence_vec,
     )
-    nonzero_incidence_idx = incidence_vec > 0
 
     rep_no_vec_samples = get_rep_no_vec_samples(
         rep_no_before_samples=rep_no_before_samples,
@@ -272,38 +275,37 @@ def _ssi_log_likelihood_samples(
         n_days=n_days,
     )
 
-    cohort_inf_case_day_samples = _gamma_samples_from_standard_normal(
-        mean=incidence_vec[nonzero_incidence_idx],
-        shape=dispersion_samples[:, None] * incidence_vec[nonzero_incidence_idx],
-        standard_normal_samples=latent_standard_normal_samples,
+    cohort_inf_vec_samples = _gamma_vec_samples(
+        mean_vec=reported_incidence_vec,
+        dispersion_samples=dispersion_samples,
+        latent_days=latent_days,
+        latent_standard_normal_samples=latent_standard_normal_samples,
     )
-    total_inf_vec_samples = (
-        cohort_inf_case_day_samples @ serial_interval_matrix[:, nonzero_incidence_idx].T
-    )
+    total_inf_vec_samples = cohort_inf_vec_samples @ serial_interval_matrix.T
     expected_incidence_local_samples = rep_no_vec_samples * total_inf_vec_samples
 
     return scipy.stats.poisson.logpmf(
-        k=incidence_vec[likelihood_idx],
+        k=reported_incidence_vec[likelihood_idx],
         mu=expected_incidence_local_samples[:, likelihood_idx],
     ).sum(axis=-1)
 
 
 def _dlo_log_likelihood_samples(
     *,
-    incidence_vec,
+    reported_incidence_vec,
     switch_day,
     delay_distributions,
     rep_no_before_samples,
     rep_no_after_samples,
     dispersion_samples,
 ):
-    n_days = len(incidence_vec)
+    n_days = len(reported_incidence_vec)
     serial_interval_matrix = delay_matrix(
         dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
     )
-    total_inf_vec = serial_interval_matrix @ incidence_vec
+    total_inf_vec = serial_interval_matrix @ reported_incidence_vec
     likelihood_idx = get_likelihood_idx(
-        incidence_vec=incidence_vec, force_vec=total_inf_vec
+        reported_incidence_vec=reported_incidence_vec, force_vec=total_inf_vec
     )
 
     rep_no_vec_samples = get_rep_no_vec_samples(
@@ -316,7 +318,7 @@ def _dlo_log_likelihood_samples(
     expected_incidence_local_samples = rep_no_vec_samples * total_inf_vec
 
     return _nbinom_logpmf(
-        k=incidence_vec[likelihood_idx],
+        k=reported_incidence_vec[likelihood_idx],
         mean=expected_incidence_local_samples[:, likelihood_idx],
         dispersion=dispersion_samples[:, None],
     ).sum(axis=-1)
@@ -324,22 +326,23 @@ def _dlo_log_likelihood_samples(
 
 def _poisson_so_log_likelihood_samples(
     *,
-    incidence_vec,
+    reported_incidence_vec,
     switch_day,
     delay_distributions,
     rep_no_before_samples,
     rep_no_after_samples,
 ):
-    n_days = len(incidence_vec)
+    n_days = len(reported_incidence_vec)
     tost_matrix = delay_matrix(
         dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
     )
     inc_period_matrix = delay_matrix(
         dist_vec=delay_distributions["inc_period"], n_days=n_days, first_lag=1
     )
-    total_inf_vec = tost_matrix @ incidence_vec
+    total_inf_vec = tost_matrix @ reported_incidence_vec
     likelihood_idx = get_likelihood_idx(
-        incidence_vec=incidence_vec, force_vec=inc_period_matrix @ total_inf_vec
+        reported_incidence_vec=reported_incidence_vec,
+        force_vec=inc_period_matrix @ total_inf_vec,
     )
 
     rep_no_vec_samples = get_rep_no_vec_samples(
@@ -354,32 +357,32 @@ def _poisson_so_log_likelihood_samples(
     ) @ inc_period_matrix.T
 
     return scipy.stats.poisson.logpmf(
-        k=incidence_vec[likelihood_idx],
+        k=reported_incidence_vec[likelihood_idx],
         mu=expected_incidence_local_samples[:, likelihood_idx],
     ).sum(axis=-1)
 
 
 def _sse_so_log_likelihood_samples(
     *,
-    incidence_vec,
+    reported_incidence_vec,
     switch_day,
     delay_distributions,
     rep_no_before_samples,
     rep_no_after_samples,
     dispersion_samples,
+    latent_days,
     latent_standard_normal_samples,
 ):
-    n_days = len(incidence_vec)
+    n_days = len(reported_incidence_vec)
     tost_matrix = delay_matrix(
         dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
     )
     inc_period_matrix = delay_matrix(
         dist_vec=delay_distributions["inc_period"], n_days=n_days, first_lag=1
     )
-    expected_total_inf_vec = tost_matrix @ incidence_vec
-    nonzero_total_inf_idx = expected_total_inf_vec > 0
+    expected_total_inf_vec = tost_matrix @ reported_incidence_vec
     likelihood_idx = get_likelihood_idx(
-        incidence_vec=incidence_vec,
+        reported_incidence_vec=reported_incidence_vec,
         force_vec=inc_period_matrix @ expected_total_inf_vec,
     )
 
@@ -390,33 +393,34 @@ def _sse_so_log_likelihood_samples(
         n_days=n_days,
     )
 
-    total_inf_nonzero_day_samples = _gamma_samples_from_standard_normal(
-        mean=expected_total_inf_vec[nonzero_total_inf_idx],
-        shape=dispersion_samples[:, None]
-        * expected_total_inf_vec[nonzero_total_inf_idx],
-        standard_normal_samples=latent_standard_normal_samples,
+    total_inf_vec_samples = _gamma_vec_samples(
+        mean_vec=expected_total_inf_vec,
+        dispersion_samples=dispersion_samples,
+        latent_days=latent_days,
+        latent_standard_normal_samples=latent_standard_normal_samples,
     )
     expected_incidence_local_samples = (
-        total_inf_nonzero_day_samples * rep_no_vec_samples[:, nonzero_total_inf_idx]
-    ) @ inc_period_matrix[:, nonzero_total_inf_idx].T
+        rep_no_vec_samples * total_inf_vec_samples
+    ) @ inc_period_matrix.T
 
     return scipy.stats.poisson.logpmf(
-        k=incidence_vec[likelihood_idx],
+        k=reported_incidence_vec[likelihood_idx],
         mu=expected_incidence_local_samples[:, likelihood_idx],
     ).sum(axis=-1)
 
 
 def _ssi_so_log_likelihood_samples(
     *,
-    incidence_vec,
+    reported_incidence_vec,
     switch_day,
     delay_distributions,
     rep_no_before_samples,
     rep_no_after_samples,
     dispersion_samples,
+    latent_days,
     latent_standard_normal_samples,
 ):
-    n_days = len(incidence_vec)
+    n_days = len(reported_incidence_vec)
     tost_matrix = delay_matrix(
         dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
     )
@@ -424,10 +428,9 @@ def _ssi_so_log_likelihood_samples(
         dist_vec=delay_distributions["inc_period"], n_days=n_days, first_lag=1
     )
     likelihood_idx = get_likelihood_idx(
-        incidence_vec=incidence_vec,
-        force_vec=inc_period_matrix @ (tost_matrix @ incidence_vec),
+        reported_incidence_vec=reported_incidence_vec,
+        force_vec=inc_period_matrix @ (tost_matrix @ reported_incidence_vec),
     )
-    nonzero_incidence_idx = incidence_vec > 0
 
     rep_no_vec_samples = get_rep_no_vec_samples(
         rep_no_before_samples=rep_no_before_samples,
@@ -436,14 +439,13 @@ def _ssi_so_log_likelihood_samples(
         n_days=n_days,
     )
 
-    cohort_inf_case_day_samples = _gamma_samples_from_standard_normal(
-        mean=incidence_vec[nonzero_incidence_idx],
-        shape=dispersion_samples[:, None] * incidence_vec[nonzero_incidence_idx],
-        standard_normal_samples=latent_standard_normal_samples,
+    cohort_inf_vec_samples = _gamma_vec_samples(
+        mean_vec=reported_incidence_vec,
+        dispersion_samples=dispersion_samples,
+        latent_days=latent_days,
+        latent_standard_normal_samples=latent_standard_normal_samples,
     )
-    total_inf_vec_samples = (
-        cohort_inf_case_day_samples @ tost_matrix[:, nonzero_incidence_idx].T
-    )
+    total_inf_vec_samples = cohort_inf_vec_samples @ tost_matrix.T
     expected_infection_incidence_local_samples = (
         rep_no_vec_samples * total_inf_vec_samples
     )
@@ -452,17 +454,17 @@ def _ssi_so_log_likelihood_samples(
     )
 
     return scipy.stats.poisson.logpmf(
-        k=incidence_vec[likelihood_idx],
+        k=reported_incidence_vec[likelihood_idx],
         mu=expected_incidence_local_samples[:, likelihood_idx],
     ).sum(axis=-1)
 
 
 def _param_layout(*, trace, priors):
-    # Names of the estimated parameters, values of the fixed parameters, and whether there
-    # are gamma latents, from the variables in the trace (where fixed parameters are
-    # deterministics). In the bridge sampling parameterisation, the last axis holds logs of
-    # the estimated parameters, then standard normal samples z = Phi^-1(u) underlying the
-    # latents (if any)
+    # Names of the estimated parameters, values of the fixed parameters, and the days with
+    # gamma latents (None if there are none), from the variables in the trace (where fixed
+    # parameters are deterministics). In the bridge sampling parameterisation, the last
+    # axis holds logs of the estimated parameters, then standard normal samples
+    # z = Phi^-1(u) underlying the latents (if any)
     model_param_names = [
         name
         for name in ("rep_no_before", "rep_no_after", "dispersion")
@@ -476,28 +478,31 @@ def _param_layout(*, trace, priors):
     estimated_param_names = [
         name for name in model_param_names if name not in fixed_params
     ]
-    has_latents = "u" in trace.posterior
-    return estimated_param_names, fixed_params, has_latents
+    latent_days = (
+        trace.posterior["u"]["latent_day"].values if "u" in trace.posterior else None
+    )
+    return estimated_param_names, fixed_params, latent_days
 
 
-def _unconstrained_posterior_samples(*, trace, estimated_param_names, has_latents):
+def _unconstrained_posterior_samples(*, trace, estimated_param_names, latent_days):
     # Posterior samples in the bridge sampling parameterisation (see _param_layout), of
     # shape (n_chains, n_draws, n_dims)
     posterior = trace.posterior
     columns = [
         np.log(posterior[name].values)[..., None] for name in estimated_param_names
     ]
-    if has_latents:
+    if latent_days is not None:
         columns.append(scipy.stats.norm.ppf(posterior["u"].values))
     return np.concatenate(columns, axis=-1)
 
 
 def _param_and_latent_samples(
-    *, unconstrained_samples, estimated_param_names, fixed_params, has_latents
+    *, unconstrained_samples, estimated_param_names, fixed_params, latent_days
 ):
-    # Parameter and latent samples, as keyword arguments for the log-likelihood functions,
-    # from samples of shape (n_samples, n_dims) in the bridge sampling parameterisation
-    # (see _param_layout), with each fixed parameter's value repeated for every sample
+    # Parameter and latent samples (with the days the latents are on), as keyword
+    # arguments for the log-likelihood functions, from samples of shape
+    # (n_samples, n_dims) in the bridge sampling parameterisation (see _param_layout), with
+    # each fixed parameter's value repeated for every sample
     param_and_latent_samples = {
         f"{name}_samples": np.exp(unconstrained_samples[:, i])
         for i, name in enumerate(estimated_param_names)
@@ -506,7 +511,8 @@ def _param_and_latent_samples(
         param_and_latent_samples[f"{name}_samples"] = np.full(
             len(unconstrained_samples), value
         )
-    if has_latents:
+    if latent_days is not None:
+        param_and_latent_samples["latent_days"] = latent_days
         param_and_latent_samples["latent_standard_normal_samples"] = (
             unconstrained_samples[:, len(estimated_param_names) :]
         )
@@ -514,7 +520,7 @@ def _param_and_latent_samples(
 
 
 def _log_prior_samples(
-    *, unconstrained_samples, estimated_param_names, has_latents, priors
+    *, unconstrained_samples, estimated_param_names, latent_days, priors
 ):
     # Log prior density of samples of shape (n_samples, n_dims) in the bridge sampling
     # parameterisation (see _param_layout). If X ~ LogNormal(mu, sigma) then
@@ -527,7 +533,7 @@ def _log_prior_samples(
             loc=prior_params["mu"],
             scale=prior_params["sigma"],
         )
-    if has_latents:
+    if latent_days is not None:
         log_prior_samples += scipy.stats.norm.logpdf(
             unconstrained_samples[:, len(estimated_param_names) :]
         ).sum(axis=-1)
@@ -541,13 +547,20 @@ def _nbinom_logpmf(*, k, mean, dispersion):
     )
 
 
-def _gamma_samples_from_standard_normal(*, mean, shape, standard_normal_samples):
-    # Gamma samples with given mean and shape, as the gamma quantile at Phi(z) for standard
-    # normal samples z. Uses the upper tail for z >= 0, where Phi(z) rounds to 1
-    z = standard_normal_samples
-    scale = mean / shape
-    return np.where(
+def _gamma_vec_samples(
+    *, mean_vec, dispersion_samples, latent_days, latent_standard_normal_samples
+):
+    # Gamma latents on every day, with shape dispersion * mean_vec and rate dispersion, as
+    # the gamma quantile at Phi(z) for standard normal samples z on the latent days (and
+    # zero on the other days, where mean_vec is zero). Uses the upper tail for z >= 0,
+    # where Phi(z) rounds to 1
+    z = latent_standard_normal_samples
+    shape = dispersion_samples[:, None] * mean_vec[latent_days]
+    scale = 1 / dispersion_samples[:, None]
+    gamma_vec_samples = np.zeros((len(dispersion_samples), len(mean_vec)))
+    gamma_vec_samples[:, latent_days] = np.where(
         z < 0,
         scipy.stats.gamma.ppf(scipy.stats.norm.cdf(z), a=shape, scale=scale),
         scipy.stats.gamma.isf(scipy.stats.norm.sf(z), a=shape, scale=scale),
     )
+    return gamma_vec_samples

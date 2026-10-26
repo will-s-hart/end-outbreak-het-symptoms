@@ -28,10 +28,12 @@ def test_delay_matrix(*, first_lag, n_days):
 
 def test_get_likelihood_idx():
     # Day-0 case with zero force is allowed (imported)
-    incidence_vec = np.array([3, 1, 0, 2, 0])
+    reported_incidence_vec = np.array([3, 1, 0, 2, 0])
     force_vec = np.array([0.0, 1.0, 0.0, 2.0, 0.0])
     np.testing.assert_array_equal(
-        get_likelihood_idx(incidence_vec=incidence_vec, force_vec=force_vec),
+        get_likelihood_idx(
+            reported_incidence_vec=reported_incidence_vec, force_vec=force_vec
+        ),
         [False, True, False, True, False],
     )
 
@@ -39,7 +41,8 @@ def test_get_likelihood_idx():
 def test_get_likelihood_idx_raises_for_local_case_without_force():
     with pytest.raises(ValueError, match="Local incidence"):
         get_likelihood_idx(
-            incidence_vec=np.array([3, 1, 1]), force_vec=np.array([0.0, 1.0, 0.0])
+            reported_incidence_vec=np.array([3, 1, 1]),
+            force_vec=np.array([0.0, 1.0, 0.0]),
         )
 
 

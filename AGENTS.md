@@ -11,8 +11,10 @@ that produces the numerical results and figures.
 
 **Status:** the library (model fitting, risk, evidence, the rolling-fit pipeline and
 plotting), the `model_fits` analysis script and the `model_comparison_plots` plot script exist,
-each with Snakemake rules. Keep this file in step as more land: describe what exists, not what
-is planned.
+each with Snakemake rules. Model fitting supports under-reporting with a known reporting
+probability (`fit_model(reporting_prob=...)`); risk, evidence and the pipeline don't yet, and
+no analysis uses it. Keep this file in step as more land: describe what exists, not what is
+planned.
 
 ## Layout
 

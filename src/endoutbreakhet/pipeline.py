@@ -19,7 +19,7 @@ from endoutbreakhet.risk import compute_risk
 def run_pipeline(
     *,
     model_name,
-    incidence_vec,
+    reported_incidence_vec,
     switch_day,
     comparison_day,
     risk_days,
@@ -31,12 +31,12 @@ def run_pipeline(
     n_jobs=-1,
 ):
     # Fits the model to the onsets up to and including each day in risk_days and
-    # comparison_day (taking onsets after the end of incidence_vec to be zero), and computes
-    # the risks of cases and transmission after that day. The trace and log evidence are
-    # kept for comparison_day only, where specs are compared
+    # comparison_day (taking onsets after the end of reported_incidence_vec to be zero), and
+    # computes the risks of cases and transmission after that day. The trace and log
+    # evidence are kept for comparison_day only, where specs are compared
     days = np.union1d(risk_days, [comparison_day])
-    incidence_vec = np.pad(
-        incidence_vec, (0, max(0, days[-1] + 1 - len(incidence_vec)))
+    reported_incidence_vec = np.pad(
+        reported_incidence_vec, (0, max(0, days[-1] + 1 - len(reported_incidence_vec)))
     )
     analyse_day = functools.partial(
         _analyse_day,
@@ -52,7 +52,7 @@ def run_pipeline(
         func=analyse_day,
         kwargs_list=[
             {
-                "incidence_vec": incidence_vec[: day + 1],
+                "reported_incidence_vec": reported_incidence_vec[: day + 1],
                 "rng": day_rng,
                 "keep_trace_and_evidence": day == comparison_day,
             }
@@ -82,7 +82,7 @@ def run_pipeline(
 def _analyse_day(
     *,
     model_name,
-    incidence_vec,
+    reported_incidence_vec,
     switch_day,
     delay_distributions,
     priors,
@@ -93,7 +93,7 @@ def _analyse_day(
 ):
     trace = fit_model(
         model_name=model_name,
-        incidence_vec=incidence_vec,
+        reported_incidence_vec=reported_incidence_vec,
         switch_day=switch_day,
         delay_distributions=delay_distributions,
         priors=priors,
@@ -103,7 +103,7 @@ def _analyse_day(
     output = {
         f"risk_{risk_type}": compute_risk(
             model_name=model_name,
-            incidence_vec=incidence_vec,
+            reported_incidence_vec=reported_incidence_vec,
             switch_day=switch_day,
             delay_distributions=delay_distributions,
             trace=trace,
@@ -116,7 +116,7 @@ def _analyse_day(
 
     evidence = compute_log_evidence(
         model_name=model_name,
-        incidence_vec=incidence_vec,
+        reported_incidence_vec=reported_incidence_vec,
         switch_day=switch_day,
         delay_distributions=delay_distributions,
         priors=priors,

@@ -10,7 +10,7 @@ def run_analyses(*, model_spec_name):
     inputs = get_inputs_model_fits(model_spec_name=model_spec_name)
     outputs = run_pipeline(
         model_name=inputs["model_name"],
-        incidence_vec=inputs["incidence_vec"],
+        reported_incidence_vec=inputs["reported_incidence_vec"],
         switch_day=inputs["switch_day"],
         comparison_day=inputs["comparison_day"],
         risk_days=inputs["risk_days"],

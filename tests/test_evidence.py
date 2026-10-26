@@ -24,7 +24,7 @@ def test_log_density_matches_pymc(
     # z = Phi^-1(u)) against the PyMC model's log density in its sampling parameterisation
     # (log params, logit(u)), corrected by the log Jacobian of logit(u) -> z
     inputs = toy_inputs_fixed_dispersion if fixed_dispersion else toy_inputs
-    model = _build_pymc_model(model_name=model_name, **inputs)
+    model = _build_pymc_model(model_name=model_name, **inputs, reporting_prob=1.0)
     free_rv_names = {rv.name for rv in model.free_RVs}
     estimated_param_names = [name for name in _PARAM_NAMES if name in free_rv_names]
     fixed_params = {
@@ -32,9 +32,11 @@ def test_log_density_matches_pymc(
         for name in _PARAM_NAMES
         if name in model.named_vars and name not in free_rv_names
     }
-    n_latents = (
-        model.initial_point()["u_interval__"].size if "u" in model.named_vars else 0
+    # Days with gamma latents, as the model has them
+    latent_days = (
+        np.array(model.coords["latent_day"]) if "u" in model.named_vars else None
     )
+    n_latents = 0 if latent_days is None else len(latent_days)
     unconstrained_samples = _prior_unconstrained_samples(
         estimated_param_names=estimated_param_names,
         n_latents=n_latents,
@@ -46,18 +48,18 @@ def test_log_density_matches_pymc(
     log_prior_samples = evidence._log_prior_samples(
         unconstrained_samples=unconstrained_samples,
         estimated_param_names=estimated_param_names,
-        has_latents=n_latents > 0,
+        latent_days=latent_days,
         priors=inputs["priors"],
     )
     log_likelihood_samples = getattr(evidence, f"_{model_name}_log_likelihood_samples")(
-        incidence_vec=inputs["incidence_vec"],
+        reported_incidence_vec=inputs["reported_incidence_vec"],
         switch_day=inputs["switch_day"],
         delay_distributions=inputs["delay_distributions"],
         **evidence._param_and_latent_samples(
             unconstrained_samples=unconstrained_samples,
             estimated_param_names=estimated_param_names,
             fixed_params=fixed_params,
-            has_latents=n_latents > 0,
+            latent_days=latent_days,
         ),
     )
 
@@ -105,30 +107,36 @@ def test_param_layout_and_unconstrained_posterior_samples(
             ("chain", "draw"),
             np.full((n_chains, n_draws), 0.18),
         )
+    coords = {}
     if n_latents:
+        # Latents on some of the days
+        coords["latent_day"] = np.sort(rng.choice(10, size=n_latents, replace=False))
         data_vars["u"] = (
-            ("chain", "draw", "u_dim_0"),
+            ("chain", "draw", "latent_day"),
             rng.uniform(size=(n_chains, n_draws, n_latents)),
         )
         # Deterministics in the trace are not used
-        data_vars["cohort_inf_case_days"] = (
-            ("chain", "draw", "cohort_inf_case_days_dim_0"),
-            rng.gamma(shape=1.0, size=(n_chains, n_draws, n_latents)),
+        data_vars["cohort_inf"] = (
+            ("chain", "draw", "day"),
+            rng.gamma(shape=1.0, size=(n_chains, n_draws, 10)),
         )
-    trace = types.SimpleNamespace(posterior=xr.Dataset(data_vars))
+    trace = types.SimpleNamespace(posterior=xr.Dataset(data_vars, coords=coords))
     inputs = toy_inputs_fixed_dispersion if fixed_dispersion else toy_inputs
 
-    returned_estimated_param_names, fixed_params, has_latents = evidence._param_layout(
+    returned_estimated_param_names, fixed_params, latent_days = evidence._param_layout(
         trace=trace, priors=inputs["priors"]
     )
     assert returned_estimated_param_names == estimated_param_names
     assert fixed_params == ({"dispersion": 0.18} if fixed_dispersion else {})
-    assert has_latents == (n_latents > 0)
+    if n_latents:
+        np.testing.assert_array_equal(latent_days, coords["latent_day"])
+    else:
+        assert latent_days is None
 
     samples = evidence._unconstrained_posterior_samples(
         trace=trace,
         estimated_param_names=estimated_param_names,
-        has_latents=has_latents,
+        latent_days=latent_days,
     )
     n_dims = len(estimated_param_names) + n_latents
     assert samples.shape == (n_chains, n_draws, n_dims)
@@ -137,7 +145,7 @@ def test_param_layout_and_unconstrained_posterior_samples(
         unconstrained_samples=samples.reshape(n_chains * n_draws, n_dims),
         estimated_param_names=estimated_param_names,
         fixed_params=fixed_params,
-        has_latents=has_latents,
+        latent_days=latent_days,
     )
     for name in [*estimated_param_names, *fixed_params]:
         np.testing.assert_allclose(
@@ -150,27 +158,50 @@ def test_param_layout_and_unconstrained_posterior_samples(
             ),
             data_vars["u"][1].reshape(n_chains * n_draws, n_latents),
         )
+        np.testing.assert_array_equal(
+            param_and_latent_samples["latent_days"], coords["latent_day"]
+        )
     else:
         assert "latent_standard_normal_samples" not in param_and_latent_samples
+        assert "latent_days" not in param_and_latent_samples
 
 
-def test_gamma_samples_from_standard_normal_match_naive_in_bulk():
-    z = np.linspace(-3, 3, 61)
+def test_gamma_vec_samples():
+    # Gamma samples with shape dispersion * mean and rate dispersion on the latent days,
+    # and zero on the others
+    rng = np.random.default_rng(0)
+    mean_vec = np.array([2.0, 0.0, 1.0, 3.0, 0.0])
+    latent_days = np.array([0, 2, 3])
+    dispersion_samples = rng.lognormal(size=4)
+    z = rng.normal(size=(4, 3))
+    expected = np.zeros((4, 5))
+    expected[:, latent_days] = scipy.stats.gamma.ppf(
+        scipy.stats.norm.cdf(z),
+        a=dispersion_samples[:, None] * mean_vec[latent_days],
+        scale=1 / dispersion_samples[:, None],
+    )
     np.testing.assert_allclose(
-        evidence._gamma_samples_from_standard_normal(
-            mean=2.0, shape=0.7, standard_normal_samples=z
+        evidence._gamma_vec_samples(
+            mean_vec=mean_vec,
+            dispersion_samples=dispersion_samples,
+            latent_days=latent_days,
+            latent_standard_normal_samples=z,
         ),
-        scipy.stats.gamma.ppf(scipy.stats.norm.cdf(z), a=0.7, scale=2.0 / 0.7),
+        expected,
         rtol=1e-10,
     )
 
 
 @pytest.mark.parametrize("shape", [0.05, 50.0])
-def test_gamma_samples_from_standard_normal_tails(*, shape):
+def test_gamma_vec_samples_tails(*, shape):
+    # One latent day, with mean 2, so dispersion shape / 2
     z = np.linspace(-9, 9, 181)
-    values = evidence._gamma_samples_from_standard_normal(
-        mean=2.0, shape=shape, standard_normal_samples=z
-    )
+    values = evidence._gamma_vec_samples(
+        mean_vec=np.array([2.0]),
+        dispersion_samples=np.full(len(z), shape / 2),
+        latent_days=np.array([0]),
+        latent_standard_normal_samples=z[:, None],
+    )[:, 0]
     assert np.all(np.isfinite(values))
     assert np.all(values >= 0)
     assert np.all(np.diff(values) >= 0)
@@ -191,6 +222,25 @@ def test_unknown_model_raises(*, toy_inputs):
         )
 
 
+def test_under_reporting_raises(*, toy_inputs):
+    posterior = xr.Dataset(
+        {
+            "unreported_incidence": (
+                ("chain", "draw", "local_day"),
+                np.zeros((1, 1, 17), int),
+            )
+        }
+    )
+    with pytest.raises(NotImplementedError, match="under-reporting"):
+        evidence.compute_log_evidence(
+            model_name="poisson",
+            **toy_inputs,
+            trace=types.SimpleNamespace(posterior=posterior),
+            n_proposal_samples=10,
+            rng=np.random.default_rng(0),
+        )
+
+
 def test_unsupported_prior_raises(*, toy_inputs):
     priors = toy_inputs["priors"] | {
         "dispersion": {"dist": "gamma", "median": 1.0, "quantile_025": 0.2}
@@ -199,7 +249,7 @@ def test_unsupported_prior_raises(*, toy_inputs):
         evidence._log_prior_samples(
             unconstrained_samples=np.zeros((2, 3)),
             estimated_param_names=_PARAM_NAMES,
-            has_latents=False,
+            latent_days=None,
             priors=priors,
         )
 
@@ -253,10 +303,10 @@ def test_bridge_sampling_matches_quadrature(*, model_name, toy_inputs_fixed_disp
     # and after the switch are independent (sampled exactly by inverse transform on a grid)
     inputs = toy_inputs_fixed_dispersion
     dispersion = inputs["priors"]["dispersion"]["value"]
-    incidence_vec = inputs["incidence_vec"]
-    n_days = len(incidence_vec)
+    reported_incidence_vec = inputs["reported_incidence_vec"]
+    n_days = len(reported_incidence_vec)
     total_inf_vec = np.convolve(
-        incidence_vec,
+        reported_incidence_vec,
         np.concatenate([[0.0], inputs["delay_distributions"]["serial_interval"]]),
     )[:n_days]
     days = np.arange(n_days)
@@ -274,10 +324,12 @@ def test_bridge_sampling_matches_quadrature(*, model_name, toy_inputs_fixed_disp
         )
         mean = np.exp(log_rep_no_grid)[:, None] * total_inf_vec[period_idx]
         if model_name == "poisson":
-            log_likelihood = scipy.stats.poisson.logpmf(incidence_vec[period_idx], mean)
+            log_likelihood = scipy.stats.poisson.logpmf(
+                reported_incidence_vec[period_idx], mean
+            )
         else:
             log_likelihood = scipy.stats.nbinom.logpmf(
-                incidence_vec[period_idx],
+                reported_incidence_vec[period_idx],
                 n=dispersion,
                 p=dispersion / (dispersion + mean),
             )
@@ -343,10 +395,10 @@ def test_bridge_sampling_ssi_matches_prior_sampling(*, toy_inputs):
         ),
         estimated_param_names=_PARAM_NAMES,
         fixed_params={},
-        has_latents=True,
+        latent_days=trace.posterior["u"]["latent_day"].values,
     )
     log_likelihood_samples = evidence._ssi_log_likelihood_samples(
-        incidence_vec=toy_inputs["incidence_vec"],
+        reported_incidence_vec=toy_inputs["reported_incidence_vec"],
         switch_day=toy_inputs["switch_day"],
         delay_distributions=toy_inputs["delay_distributions"],
         **param_and_latent_samples,
