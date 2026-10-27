@@ -58,7 +58,6 @@ def fit_model(
                 else ds
             )
         )
-    trace.attrs["reporting_prob"] = float(reporting_prob)
     return trace
 
 

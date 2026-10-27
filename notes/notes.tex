@@ -11,31 +11,33 @@
 \newcommand{\MultinomialDist}[2]{\mathrm{Multinomial}\left(#1; #2\right)}
 \newcommand{\incPMF}{p^{(\mathrm{inc})}}
 \newcommand{\tostPMF}{p^{(\mathrm{tost})}}
+\newcommand{\offPMF}{p^{(\mathrm{off})}}
+\newcommand{\offPGF}{G^{(\mathrm{off})}}
 \newcommand{\incCDF}{F^{(\mathrm{inc})}}
 \newcommand{\tostCDF}{F^{(\mathrm{tost})}}
+\newcommand{\Rfut}{R^{(\mathrm{fut})}}
 \newcommand{\RAC}{\mathrm{RAC}}
 \newcommand{\RAT}{\mathrm{RAT}}
+\newcommand{\RST}{\mathrm{RST}}
+\newcommand{\RAR}{\mathrm{RAR}}
 \newcommand{\NBPMF}[3]{p_{\mathrm{NB}}\left(#1; \mathrm{mean}=#2,
 \mathrm{dispersion}=#3\right)}
 \newcommand{\Prob}[1]{\mathrm{Prob}\left(#1\right)}
+\newcommand{\E}[1]{\mathrm{E}\left[#1\right]}
 
 \begin{document}
 
 \section{Assumptions and notation}
+\subsection{Transmission and delays}
 
-Only symptom-onset counts \(C_t\) are observed. Infection counts \(I_t\)
+\(C_t\) denotes the number of symptom onsets (cases) on day \(t\),
+reported or not (Section~\ref{sec:reporting}). Infection counts \(I_t\)
 and infectiousness variables \(Y_t,Z_t\), where present, are latent.
 Naive models identify transmission and case events without explicitly
 modelling incubation. Every infection eventually produces symptoms,
-and there are no future importations.
-
-\(\RAC(t)\) and \(\RAT(t)\) are the probabilities of at least one
-additional case (symptom onset) and transmission, respectively, strictly
-after day \(t\). Unless stated otherwise, risks condition on onsets through
-\(t\) and fixed model parameters. Additional conditioning on latent histories
-is stated locally; observation-only risks then require posterior averaging.
-Distributional statements below specify sequential conditional models,
-with conditioning on the relevant history suppressed.
+and there are no future importations. Distributional statements below
+specify sequential conditional models, with conditioning on the relevant
+history suppressed.
 
 The normalized delay PMFs are \(w_s\) (naive-model serial interval),
 \(\incPMF_s\) (incubation period), and \(\tostPMF_s\) (time from
@@ -55,18 +57,161 @@ We use \(s\) for delays, \(a\) for one-based cohort age
 
 \(\lambda_t\) denotes daily infectiousness before multiplication by
 \(R_t\), and \(\Lambda_t^{(\mathrm{rem})}\) its accumulated remaining
-contribution from existing cases. In SO models, \(\mu_t\)
-is the conditional infection intensity and \(\bar N_t^{(\mathrm{inc})}\)
-the conditional mean number still incubating at the end of day \(t\).
-The bar denotes the expectation of \(N_t^{(\mathrm{inc})}\) under the
-conditioning stated for the corresponding derivation.
-Where assumed, constant future reproduction means
-\(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\).
+contribution after \(t\) from cases with onset by \(t\). In SO models,
+\(\mu_t\) is the conditional infection intensity and
+\(\bar N_t^{(\mathrm{inc})}\) the conditional mean number still incubating
+at the end of day \(t\). The bar denotes the expectation of
+\(N_t^{(\mathrm{inc})}\) (Section~\ref{sec:risks}) under the conditioning
+stated for the corresponding derivation.
 
 \(\NBDist{\mu}{\kappa}\) has variance \(\mu+\mu^2/\kappa\),
 for \(\kappa>0\). Gamma distributions use shape and rate parameters.
 Zero-shape Gamma variables and zero-intensity SSE negative-binomial
-variables are defined as point masses at zero.
+variables are defined as point masses at zero. The probability generating
+functions (PGFs) of \(\PoissonDist{\mu}\) and \(\NBDist{\mu}{\kappa}\) are
+\begin{equation}
+  \exp\left(-\mu(1-z)\right)\quad\text{and}\quad
+  \left(1+\frac{\mu}{\kappa}(1-z)\right)^{-\kappa},
+\end{equation}
+respectively.
+
+\subsection{Reporting and inference}
+\label{sec:reporting}
+
+Each case is reported independently with known probability
+\(\rho\in(0,1]\), so that only the reported counts
+\(C_t^{(\mathrm{obs})}\) are observed, with
+\begin{equation}
+  C_t^{(\mathrm{obs})}\mid C_t \sim \BinomialDist{C_t}{\rho},
+\end{equation}
+and unreported counts \(C_t^{(\mathrm{unobs})}=C_t-C_t^{(\mathrm{obs})}\).
+\(\rho=1\) gives complete reporting. The imported cases on the first day
+are conditioned on and taken to be all reported. Unreported cases transmit
+as reported cases do, so the models below describe the total counts
+\(C_t\): infectiousness, and the infectiousness latents \(Y_t\) and
+\(Z_t\), depend on total rather than reported counts, and the history on
+which each distributional statement conditions includes earlier unreported
+counts.
+
+For each day \(t\) after the first, \(C_t\) follows the model's
+distribution given the history, and \(C_t^{(\mathrm{obs})}\mid C_t\) is
+binomial as above. The unreported counts enter infectiousness on later days,
+so they cannot be integrated out in closed form. We therefore infer them
+alongside the model parameters and any infectiousness latents, sampling
+from the joint posterior of these quantities given the reported counts.
+When \(\rho<1\), unreported cases are possible on any day with nonzero
+infectiousness, so the infectiousness latents are needed on every day,
+rather than only on days with reported cases (SSI and SSI-SO models) or
+nonzero infectiousness from reported cases (SSE-SO model). They are zero on
+days where their Gamma shape is zero.
+
+Appendix~\ref{sec:factorisation} gives an equivalent factorisation of each
+day's contribution into reported and unreported counts.
+
+\section{Risks of further cases, transmission and reports}
+\label{sec:risks}
+
+\(\RAC(t)\), \(\RAT(t)\) and \(\RAR(t)\) are the probabilities of at least
+one additional case (symptom onset, reported or not), transmission and
+reported case, respectively, strictly after day \(t\). \(\RST(t)\) is the
+probability of sustained transmission, i.e.\ that transmission never dies
+out. Since sustained transmission entails transmission after \(t\) and,
+almost surely, a reported case, \(\RST(t)\leq\RAT(t)\leq\RAC(t)\) and
+\(\RST(t)\leq\RAR(t)\leq\RAC(t)\), with \(\RAR(t)=\RAC(t)\) when
+\(\rho=1\). Risks condition on the total counts through \(t\) and fixed
+model parameters, and additionally on any infectiousness latents through
+\(t\) stated in the model sections. Risks given only the reported counts
+are obtained by averaging over the joint posterior of these quantities
+(Section~\ref{sec:reporting}). We assume that \(R_\tau=\Rfut\) for every
+\(\tau>t\).
+
+Call cases with onset by \(t\) existing and those with onset after \(t\)
+future. Let \(N_t^{(\mathrm{rem})}\) count direct infections after \(t\)
+by existing cases, and \(N_t^{(\mathrm{inc})}\) count individuals infected
+by \(t\) whose onsets are after \(t\) (whose infectors are existing cases,
+by nonnegative TOST). Naive models identify transmission with onset, so
+\(N_t^{(\mathrm{inc})}=0\) there. Then
+\(N_t=N_t^{(\mathrm{rem})}+N_t^{(\mathrm{inc})}\) counts future cases
+directly infected by existing cases, and every future case is one of these
+or a descendant of one. In each SO model, \(N_t^{(\mathrm{rem})}\) and
+\(N_t^{(\mathrm{inc})}\) are independent. Their PGFs are
+\(G_t^{(\mathrm{rem})}(z)\) and \(G_t^{(\mathrm{inc})}(z)\).
+
+A future case transmits only after its onset, so its infectiousness and
+reporting are not informed by data through \(t\). Under \(\Rfut\), the
+total numbers of direct infections (offspring) of future cases are
+independent of each other and of \(N_t\), with common PMF \(\offPMF_j\)
+and PGF \(\offPGF(z)\). For the SSE and SSE-SO models, this holds because
+independent negative binomial variables with a common probability
+parameter, here \(k/(k+R)\), sum to a negative binomial variable whose mean
+and dispersion are the sums of theirs. A count with mean \(R\lambda\) and
+dispersion \(k\lambda\) is therefore the sum of independent contributions
+with mean \(Rw\) and dispersion \(kw\) from each case's share \(w\) of
+\(\lambda\), and each case's offspring total is \(\NBDist{R}{k}\),
+independently across cases.
+
+In the DLO model, daily counts do not split in this way (the dispersion
+\(k\) does not scale with \(\lambda_t\)), so it is not a branching process
+and the formulae below do not apply. We give only its
+\(\RAC(t)=\RAT(t)\), computed directly (Section~\ref{sec:dlo});
+\(\RST(t)\) and \(\RAR(t)\) could be estimated by simulation.
+
+\subsection{Risk of additional cases}
+
+No future case occurs if and only if \(N_t=0\), so
+\begin{align}
+  \RAC(t)&=1-\Prob{N_t^{(\mathrm{rem})}=0}
+  &&\text{(naive models)},\\
+  \RAC(t)&=1-\Prob{N_t^{(\mathrm{rem})}=0}\Prob{N_t^{(\mathrm{inc})}=0}
+  &&\text{(SO models)}.
+\end{align}
+
+\subsection{Risk of additional transmission}
+
+In naive models, \(\RAT(t)=\RAC(t)\). In SO models, each infection counted
+by \(N_t^{(\mathrm{rem})}\) is a transmission after \(t\), while each
+individual counted by \(N_t^{(\mathrm{inc})}\) transmits after \(t\) unless
+it has no offspring. Conditioning on \(N_t^{(\mathrm{inc})}\) therefore
+gives
+\begin{align}
+  \nonumber\RAT(t)
+  &=1-\Prob{N_t^{(\mathrm{rem})}=0}\sum_{j=0}^{\infty}\left(\offPMF_0\right)^{j}
+  \Prob{N_t^{(\mathrm{inc})}=j}\\
+  &=1-\Prob{N_t^{(\mathrm{rem})}=0}G_t^{(\mathrm{inc})}\left(\offPMF_0\right).
+\end{align}
+
+\subsection{Risk of sustained transmission}
+
+Grouped by generation, the lineage of each individual counted by \(N_t\)
+(the individual and its descendants) is an independent Galton--Watson
+process with offspring PGF \(\offPGF\). Each dies out with probability
+\(q\), the smallest root in \([0,1]\) of \(q=\offPGF(q)\), with \(q=1\) if
+and only if \(\Rfut\leq1\). Transmission dies out if and only if every
+lineage does, so \(\RST(t)=1-\E{q^{N_t}}\), i.e.
+\begin{align}
+  \RST(t)&=1-G_t^{(\mathrm{rem})}(q)
+  &&\text{(naive models)},\\
+  \RST(t)&=1-G_t^{(\mathrm{rem})}(q)G_t^{(\mathrm{inc})}(q)
+  &&\text{(SO models)}.
+\end{align}
+
+\subsection{Risk of additional reports}
+
+A lineage contains no reported case if and only if its founder is
+unreported and none of its founder's offspring's lineages contains one.
+The probability \(q_\rho\) of this therefore satisfies
+\(q_\rho=(1-\rho)\offPGF(q_\rho)\), which has a unique root in \([0,1]\)
+since \((1-\rho)\offPGF(x)-x\) is convex in \(x\), nonnegative at \(x=0\)
+and equal to \(-\rho<0\) at \(x=1\). (Unlike \(q\), a limit of increasing
+probabilities, \(q_\rho\) is the limit of the decreasing probabilities of
+no reported case in the first \(n\) generations, so it would be the largest
+root if there were several, as at \(\rho=0\).) As for \(\RST(t)\),
+\begin{align}
+  \RAR(t)&=1-G_t^{(\mathrm{rem})}(q_\rho)
+  &&\text{(naive models)},\\
+  \RAR(t)&=1-G_t^{(\mathrm{rem})}(q_\rho)G_t^{(\mathrm{inc})}(q_\rho)
+  &&\text{(SO models)}.
+\end{align}
 
 \section{Naive models}
 \subsection{Poisson model}
@@ -77,21 +222,19 @@ variables are defined as point masses at zero.
   C_t &\sim \PoissonDist{R_{t}\lambda_{t}}.
 \end{align}
 
-\subsubsection{Risk of additional cases and transmission}
+\subsubsection{Risks}
 
+\begin{align}
+  N^{(\mathrm{rem})}_{t} &\sim \PoissonDist{\Rfut\Lambda^{(\mathrm{rem})}_{t}},\\
+  \Lambda^{(\mathrm{rem})}_{t} &= \sum_{a=1}^{m} (1-F_{a-1}^{(w)})C_{t+1-a},
+\end{align}
+and future cases have \(\PoissonDist{\Rfut}\) offspring. Hence
 \begin{equation}
-  \RAC(t) =\RAT(t)=
-  1-\exp\left(-\sum_{\tau=t+1}^{t+m}R_{\tau}\sum_{s=\tau-t}^{m}
-  C_{\tau-s} w_s\right).
+  \RAC(t)=\RAT(t)=1-\exp(-\Rfut\Lambda^{(\mathrm{rem})}_{t}).
 \end{equation}
 
-Assuming that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\), we have
-\begin{align}
-  \RAC(t)&=\RAT(t)=1-\exp(-R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}),\\
-  \Lambda^{(\mathrm{rem})}_{t} &= \sum_{a=1}^{m} (1-F_{a-1}^{(w)})C_{t+1-a}.
-\end{align}
-
 \subsection{DLO model}
+\label{sec:dlo}
 \subsubsection{Model definition}
 
 \begin{align}
@@ -99,22 +242,17 @@ Assuming that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\), we have
   C_t &\sim \NBDist{R_{t}\lambda_{t}}{k}.
 \end{align}
 
-\subsubsection{Risk of additional cases and transmission}
+\subsubsection{Risks}
 
+Existing cases' infectiousness ends by day \(t+m\), so no future case
+occurs if and only if \(C_\tau=0\) for \(\tau=t+1,\ldots,t+m\). Given no
+cases on days \(t+1,\ldots,\tau-1\), only existing cases contribute to
+\(\lambda_\tau\), so
 \begin{align}
-  \nonumber&\RAC(t)=\RAT(t)\\
-  &=
-  1-\prod_{\tau=t+1}^{t+m}\NBPMF{0}{R_{\tau}\sum_{s=\tau-t}^{m}
+  \nonumber\RAC(t)=\RAT(t)
+  &=1-\prod_{\tau=t+1}^{t+m}\NBPMF{0}{\Rfut\sum_{s=\tau-t}^{m}
   C_{\tau-s} w_s}{k}\\
-  &=
-  1-\prod_{\tau=t+1}^{t+m}{\left(\frac{k}{k+R_{\tau}\sum_{s=\tau-t}^{m}
-  C_{\tau-s} w_s}\right)}^{k}.
-\end{align}
-
-Assuming that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\), we have
-\begin{align}
-  \RAC(t)&=\RAT(t)=
-  1-\prod_{\tau=t+1}^{t+m}{\left(\frac{k}{k+R^{(\mathrm{fut})}\sum_{s=\tau-t}^{m}
+  &=1-\prod_{\tau=t+1}^{t+m}{\left(\frac{k}{k+\Rfut\sum_{s=\tau-t}^{m}
   C_{\tau-s} w_s}\right)}^{k}.
 \end{align}
 
@@ -126,25 +264,18 @@ Assuming that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\), we have
   C_t &\sim \NBDist{R_{t}\lambda_{t}}{k\lambda_{t}}.
 \end{align}
 
-\subsubsection{Risk of additional cases and transmission}
+\subsubsection{Risks}
 
-\begin{align}
-  \nonumber&\RAC(t)=\RAT(t)\\
-  &=
-  1-\prod_{\tau=t+1}^{t+m}\NBPMF{0}{R_{\tau}\sum_{s=\tau-t}^{m}
-  C_{\tau-s} w_s}{k\sum_{s=\tau-t}^{m}
-  C_{\tau-s} w_s}\\
-  &=
-  1-\prod_{\tau=t+1}^{t+m}{\left(\frac{k}{k+R_{\tau}}\right)}^{k\sum_{s=\tau-t}^{m}
-  C_{\tau-s} w_s}.
-\end{align}
-
-Assuming that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\), we have
-\begin{align}
-  \RAC(t)&=\RAT(t)=
-  1-{\left(\frac{k}{k+R^{(\mathrm{fut})}}\right)}^{k\Lambda^{(\mathrm{rem})}_{t}},\\
-  \Lambda^{(\mathrm{rem})}_{t} &= \sum_{a=1}^{m} (1-F_{a-1}^{(w)})C_{t+1-a}.
-\end{align}
+\begin{equation}
+  N^{(\mathrm{rem})}_{t} \sim
+  \NBDist{\Rfut\Lambda^{(\mathrm{rem})}_{t}}{k\Lambda^{(\mathrm{rem})}_{t}},
+\end{equation}
+with \(\Lambda^{(\mathrm{rem})}_{t}\) as in the Poisson model, and future
+cases have \(\NBDist{\Rfut}{k}\) offspring. Hence
+\begin{equation}
+  \RAC(t)=\RAT(t)=
+  1-{\left(\frac{k}{k+\Rfut}\right)}^{k\Lambda^{(\mathrm{rem})}_{t}}.
+\end{equation}
 
 \subsection{SSI model}
 \subsubsection{Model definition}
@@ -155,20 +286,19 @@ Assuming that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\), we have
   Y_t &\sim \GammaDist{kC_t}{k}.
 \end{align}
 
-\subsubsection{Risk of additional cases and transmission}
+\subsubsection{Risks}
 
-Additionally conditioning on \(Y_\tau\) for \(\tau\leq t\):
-\begin{equation}
-  \RAC(t) =\RAT(t)=
-  1-\exp\left(-\sum_{\tau=t+1}^{t+m}R_{\tau}\sum_{s=\tau-t}^{m}
-  Y_{\tau-s} w_s\right).
-\end{equation}
-
-Assuming that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\), we have
+Additionally conditioning on \(Y_\tau\) for \(\tau\leq t\),
 \begin{align}
-  \RAC(t)&=\RAT(t)=1-\exp(-R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}),\\
+  N^{(\mathrm{rem})}_{t} &\sim \PoissonDist{\Rfut\Lambda^{(\mathrm{rem})}_{t}},\\
   \Lambda^{(\mathrm{rem})}_{t} &= \sum_{a=1}^{m} (1-F_{a-1}^{(w)})Y_{t+1-a}.
 \end{align}
+\(Y_t\) is the sum of \(C_t\) independent \(\GammaDist{k}{k}\) individual
+infectiousness values, and integrating these out, future cases have
+\(\NBDist{\Rfut}{k}\) offspring. Hence
+\begin{equation}
+  \RAC(t)=\RAT(t)=1-\exp(-\Rfut\Lambda^{(\mathrm{rem})}_{t}).
+\end{equation}
 
 \section{Symptom onset-anchored models}
 
@@ -185,9 +315,17 @@ on day \(t\) with incubation period \(s\):
 \end{align}
 The equivalent forms below integrate out infection counts and incubation
 allocations, retaining any infectiousness latents in the sequential model.
-In each model, \(q_0\) denotes the probability that an individual with
-onset after \(t\) produces no direct infections, integrating out its
-future infectiousness.
+In each, \(I_t\sim\PoissonDist{\mu_t}\) given the history.
+
+Under the conditioning stated for each model, Poisson splitting leaves
+independent, unrevealed infection components with onset after \(t\);
+nonnegative TOST prevents these individuals from affecting the history
+before onset. Hence, independently of \(N_t^{(\mathrm{rem})}\),
+\begin{align}
+  N^{(\mathrm{inc})}_{t} &\sim \PoissonDist{\bar N_t^{(\mathrm{inc})}},\\
+  \bar N_t^{(\mathrm{inc})} &= \sum_{a=1}^{m_{\mathrm{inc}}}
+  (1-\incCDF_{a-1})\mu_{t+1-a}.
+\end{align}
 
 \subsection{Poisson-SO model}
 \subsubsection{Model definition}
@@ -206,53 +344,22 @@ future infectiousness.
   C_{t-s} \tostPMF_{s}.
 \end{align}
 
-\subsubsection{Risk of additional cases and transmission}
+\subsubsection{Risks}
 
-Assume that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\).
-Let \(N_t^{(\mathrm{rem})}\) count direct infections after \(t\) generated
-by cases with onset by \(t\), and \(N_t^{(\mathrm{inc})}\) count individuals
-infected by \(t\) whose onsets are after \(t\). Conditional on observed
-onsets and parameters, these counts are independent, with
 \begin{align}
   N^{(\mathrm{rem})}_{t} &\sim
-  \PoissonDist{R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}},\\
+  \PoissonDist{\Rfut\Lambda^{(\mathrm{rem})}_{t}},\\
   \Lambda^{(\mathrm{rem})}_{t}&=\sum_{a=1}^{m_{\mathrm{tost}}}
-  (1-\tostCDF_{a-1})C_{t+1-a},\\
-  N^{(\mathrm{inc})}_{t} &\sim \PoissonDist{\bar N_t^{(\mathrm{inc})}},\\
-  \bar N_t^{(\mathrm{inc})} &= \sum_{a=1}^{m_{\mathrm{inc}}}
-  (1-\incCDF_{a-1})\mu_{t+1-a}.
+  (1-\tostCDF_{a-1})C_{t+1-a},
 \end{align}
-Poisson splitting leaves independent, unrevealed infection components
-with onset after \(t\); nonnegative TOST prevents these individuals from
-affecting the observed history before onset.
-
-These counts exclude subsequent descendants, but their joint absence
-is equivalent to no future cases. Hence
-\begin{equation}
-  \RAC(t)=1-\exp\left(-\left(R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}+\bar
-  N_t^{(\mathrm{inc})}\right)\right).
-\end{equation}
-
-Each incubating individual has its full transmission profile ahead of it,
-with probability
-\begin{equation}
-  q_{0}=e^{-R^{(\mathrm{fut})}}
-\end{equation}
-of no direct transmissions.
-Conditioning on the incubating count therefore gives
+and future cases have \(\PoissonDist{\Rfut}\) offspring, so
+\(\offPMF_0=e^{-\Rfut}\). Hence
 \begin{align}
-  \nonumber&\RAT(t)\\
-  &=
-  1-\Prob{N^{(\mathrm{rem})}_{t}=0}\sum_{j=0}^{\infty}\Prob{\mathrm{no\ transm.\ from\ }j\ \mathrm{inc.\ individuals}}\Prob{N^{(\mathrm{inc})}_{t}=j}\\
-  &=
-  1-\exp\left(-R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}\right)\sum_{j=0}^{\infty}q_{0}^{j}\Prob{N^{(\mathrm{inc})}_{t}=j}\\
-  &=
-  1-\exp\left(-\left(R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}+\left(1-q_{0}\right)\bar
-  N_t^{(\mathrm{inc})}\right)\right),
+  \RAC(t)&=1-\exp\left(-\left(\Rfut\Lambda^{(\mathrm{rem})}_{t}+\bar
+  N_t^{(\mathrm{inc})}\right)\right),\\
+  \RAT(t)&=1-\exp\left(-\left(\Rfut\Lambda^{(\mathrm{rem})}_{t}+\left(1-\offPMF_0\right)\bar
+  N_t^{(\mathrm{inc})}\right)\right).
 \end{align}
-where the sum can be evaluated either directly or by noting that this
-is the probability generating function of a Poisson distribution evaluated
-at \(q_{0}\).
 
 \subsection{SSE-SO model}
 \subsubsection{Model definition}
@@ -280,33 +387,21 @@ Equivalent to:
   Z_t &\sim \GammaDist{k\lambda_{t}}{k}.
 \end{align}
 
-\subsubsection{Risk of additional cases and transmission}
+\subsubsection{Risks}
 
-Assume that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\).
-Additionally conditioning on \(Z_\tau\) for \(\tau\leq t\), the counts
-\(N_t^{(\mathrm{rem})}\) and \(N_t^{(\mathrm{inc})}\) are independent, with
+Additionally conditioning on \(Z_\tau\) for \(\tau\leq t\),
+\begin{equation}
+  N^{(\mathrm{rem})}_{t} \sim
+  \NBDist{\Rfut\Lambda^{(\mathrm{rem})}_{t}}{k\Lambda^{(\mathrm{rem})}_{t}},
+\end{equation}
+with \(\Lambda^{(\mathrm{rem})}_{t}\) as in the Poisson-SO model, and
+future cases have \(\NBDist{\Rfut}{k}\) offspring, so
+\(\offPMF_0=\left(k/(k+\Rfut)\right)^{k}\). Hence
 \begin{align}
-  N^{(\mathrm{rem})}_{t} &\sim
-  \NBDist{R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}}{k\Lambda^{(\mathrm{rem})}_{t}},\\
-  \Lambda^{(\mathrm{rem})}_{t}&=\sum_{a=1}^{m_{\mathrm{tost}}}
-  (1-\tostCDF_{a-1})C_{t+1-a},\\
-  N^{(\mathrm{inc})}_{t} &\sim \PoissonDist{\bar N_t^{(\mathrm{inc})}},\\
-  \bar N_t^{(\mathrm{inc})} &= \sum_{a=1}^{m_{\mathrm{inc}}}
-  (1-\incCDF_{a-1})\mu_{t+1-a}.
-\end{align}
-
-Then, by similar reasoning to the Poisson-SO model, we have
-\begin{align}
-  \RAC(t)&=1-\left(\frac{k}{k+R^{(\mathrm{fut})}}\right)^{k\Lambda_{t}^{(\mathrm{rem})}}\exp\left(-\bar
+  \RAC(t)&=1-\left(\frac{k}{k+\Rfut}\right)^{k\Lambda_{t}^{(\mathrm{rem})}}\exp\left(-\bar
   N_t^{(\mathrm{inc})}\right),\\
-  \RAT(t)&=1-\left(\frac{k}{k+R^{(\mathrm{fut})}}\right)^{k\Lambda_{t}^{(\mathrm{rem})}}\exp\left(-\left(1-q_{0}\right)\bar
-  N_t^{(\mathrm{inc})}\right),
-\end{align}
-where here, since the offspring distribution for future cases is
-\(\NBDist{R^{(\mathrm{fut})}}{k}\), we have
-\begin{align}
-  q_{0}&=\NBPMF{0}{R^{(\mathrm{fut})}}{k} =
-  \left(\frac{k}{k+R^{(\mathrm{fut})}}\right)^{k}.
+  \RAT(t)&=1-\left(\frac{k}{k+\Rfut}\right)^{k\Lambda_{t}^{(\mathrm{rem})}}\exp\left(-\left(1-\offPMF_0\right)\bar
+  N_t^{(\mathrm{inc})}\right).
 \end{align}
 
 \subsection{SSI-SO model}
@@ -328,71 +423,24 @@ where here, since the offspring distribution for future cases is
   Y_t &\sim \GammaDist{kC_t}{k}.
 \end{align}
 
-\subsubsection{Risk of additional cases and transmission}
+\subsubsection{Risks}
 
-Assume that \(R_\tau=R^{(\mathrm{fut})}\) for every \(\tau>t\).
-Additionally conditioning on \(Y_\tau\) for \(\tau\leq t\), the counts
-\(N_t^{(\mathrm{rem})}\) and \(N_t^{(\mathrm{inc})}\) are independent, with
+Additionally conditioning on \(Y_\tau\) for \(\tau\leq t\),
 \begin{align}
   N^{(\mathrm{rem})}_{t} &\sim
-  \PoissonDist{R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}},\\
+  \PoissonDist{\Rfut\Lambda^{(\mathrm{rem})}_{t}},\\
   \Lambda^{(\mathrm{rem})}_{t}&=\sum_{a=1}^{m_{\mathrm{tost}}}
-  (1-\tostCDF_{a-1})Y_{t+1-a},\\
-  N^{(\mathrm{inc})}_{t} &\sim \PoissonDist{\bar N_t^{(\mathrm{inc})}},\\
-  \bar N_t^{(\mathrm{inc})} &= \sum_{a=1}^{m_{\mathrm{inc}}}
-  (1-\incCDF_{a-1})\mu_{t+1-a}.
+  (1-\tostCDF_{a-1})Y_{t+1-a},
 \end{align}
-
-Then,
+and, integrating out the Gamma infectiousness of each future case as in
+the SSI model, future cases have \(\NBDist{\Rfut}{k}\) offspring, so
+\(\offPMF_0=\left(k/(k+\Rfut)\right)^{k}\). Hence
 \begin{align}
-  \RAC(t)&=1-\exp\left(-\left(R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}+\bar
+  \RAC(t)&=1-\exp\left(-\left(\Rfut\Lambda^{(\mathrm{rem})}_{t}+\bar
   N_t^{(\mathrm{inc})}\right)\right),\\
-  \RAT(t)&=1-\exp\left(-\left(R^{(\mathrm{fut})}\Lambda^{(\mathrm{rem})}_{t}+\left(1-q_{0}\right)\bar
-  N_t^{(\mathrm{inc})}\right)\right),
+  \RAT(t)&=1-\exp\left(-\left(\Rfut\Lambda^{(\mathrm{rem})}_{t}+\left(1-\offPMF_0\right)\bar
+  N_t^{(\mathrm{inc})}\right)\right).
 \end{align}
-where, integrating out the Gamma infectiousness of each future case,
-\begin{equation}
-  q_{0}=\NBPMF{0}{R^{(\mathrm{fut})}}{k}
-  =\left(\frac{k}{k+R^{(\mathrm{fut})}}\right)^k.
-\end{equation}
-
-\section{Under-reporting}
-
-We now suppose that each case is reported independently with known
-probability \(\rho\in(0,1]\), so that only the reported counts
-\(C_t^{(\mathrm{obs})}\) are observed, with
-\begin{equation}
-  C_t^{(\mathrm{obs})}\mid C_t \sim \BinomialDist{C_t}{\rho},
-\end{equation}
-and unreported counts \(C_t^{(\mathrm{unobs})}=C_t-C_t^{(\mathrm{obs})}\).
-The imported cases on the first day are conditioned on and taken to be
-all reported. Unreported cases transmit as reported cases do,
-so the models above describe the total counts \(C_t\): infectiousness,
-and the infectiousness latents \(Y_t\) and \(Z_t\), depend on total rather
-than reported counts, and the history on which each distributional
-statement conditions includes earlier unreported counts.
-
-\subsection{Inference}
-
-For each day \(t\) after the first, \(C_t\) follows the model's
-distribution given the history, and \(C_t^{(\mathrm{obs})}\mid C_t\) is
-binomial as above. The unreported counts enter infectiousness on later days,
-so they cannot be integrated out in closed form. We therefore infer them
-alongside the model parameters and any infectiousness latents, sampling
-from the joint posterior of these quantities given the reported counts.
-Since unreported cases are possible on any day with nonzero infectiousness,
-the infectiousness latents are needed on every day, rather than only on
-days with reported cases (SSI and SSI-SO models) or nonzero infectiousness
-from reported cases (SSE-SO model). They are zero on days where their Gamma
-shape is zero.
-
-The risks of additional cases and transmission refer to all cases, reported
-or not. They are given by the expressions in the previous sections with
-total counts (and the corresponding infectiousness latents), so they are
-computed at each joint posterior sample and averaged over the posterior.
-
-Appendix~\ref{sec:factorisation} gives an equivalent factorisation of each
-day's contribution into reported and unreported counts.
 
 \begin{appendix}
   \section{Factorisation of reported and unreported counts}

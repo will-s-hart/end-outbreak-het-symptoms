@@ -4,9 +4,9 @@ import pymc as pm
 import pytest
 import scipy.special
 import scipy.stats
-import xarray as xr
 
 from endoutbreakhet.inference import _build_pymc_model, fit_model
+from endoutbreakhet.risk import compute_risk
 from endoutbreakhet.utils import parse_lognormal_prior
 
 # Toy data: 9 days with cases, and 14 days with nonzero expected total infectiousness
@@ -321,7 +321,7 @@ def _slice_and_untuned_metropolis():
         ("ssi", _slice_and_untuned_metropolis, 0.5),
     ],
 )
-def test_fit_model(*, model_name, step, reporting_prob, toy_inputs, tmp_path):
+def test_fit_model(*, model_name, step, reporting_prob, toy_inputs):
     trace = fit_model(
         model_name=model_name,
         **toy_inputs,
@@ -337,10 +337,6 @@ def test_fit_model(*, model_name, step, reporting_prob, toy_inputs, tmp_path):
     )
     assert {"rep_no_before", "rep_no_after"} <= set(trace.posterior.data_vars)
     np.testing.assert_array_equal(trace.posterior.draw, np.arange(10))
-    # The reporting probability is kept with the trace when saved
-    trace.to_netcdf(tmp_path / "trace.nc")
-    with xr.open_datatree(tmp_path / "trace.nc") as saved_trace:
-        assert saved_trace.attrs["reporting_prob"] == reporting_prob
     # Day coordinates reach the trace
     assert trace.observed_data["likelihood"].dims == ("likelihood_day",)
     if model_name == "ssi":
@@ -367,6 +363,22 @@ def test_fit_model(*, model_name, step, reporting_prob, toy_inputs, tmp_path):
             toy_inputs["reported_incidence_vec"]
             + np.pad(unreported_incidence.values, ((0, 0), (0, 0), (1, 0))),
         )
+
+    # The trace has what risk needs, giving risks ordered as in the notes
+    risks = {
+        risk_type: compute_risk(
+            model_name=model_name,
+            reported_incidence_vec=toy_inputs["reported_incidence_vec"],
+            switch_day=toy_inputs["switch_day"],
+            delay_distributions=toy_inputs["delay_distributions"],
+            trace=trace,
+            reporting_prob=reporting_prob,
+            risk_type=risk_type,
+        )
+        for risk_type in ("cases", "transmission", "sustained", "reports")
+    }
+    assert 0 <= risks["sustained"] <= risks["transmission"] <= risks["cases"] <= 1
+    assert risks["sustained"] <= risks["reports"] <= risks["cases"]
 
 
 @pytest.mark.parametrize(
