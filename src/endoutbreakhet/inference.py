@@ -61,28 +61,6 @@ def fit_model(
     return trace
 
 
-def _check_step(*, step, model):
-    # Raise if a step method samples a discrete variable (unreported case counts) that it
-    # can't (e.g. slice sampling, whose proposals are truncated to integers), by PyMC's own
-    # competence ranking
-    if isinstance(step, Sequence):
-        for method in step:
-            _check_step(step=method, model=model)
-        return
-    if isinstance(step, CompoundStep):
-        _check_step(step=step.methods, model=model)
-        return
-    for var in step.vars:
-        if var not in model.discrete_value_vars:
-            continue
-        (competence,) = type(step)._competence(model.values_to_rvs[var], False)
-        if competence == Competence.INCOMPATIBLE:
-            raise ValueError(
-                f"{type(step).__name__} can't sample the discrete variable {var.name}: "
-                "leave it to pm.sample's automatic assignment, or use pm.Metropolis"
-            )
-
-
 def _build_pymc_model(
     *,
     model_name,
@@ -196,7 +174,7 @@ def _build_ssi_model(
     cohort_inf_vec = _gamma_via_uniform(
         name="cohort_inf",
         mean_vec=total_incidence_vec,
-        dispersion=dispersion,
+        rate=dispersion,
         latent_idx=latent_idx,
     )
     total_inf_vec = pm.math.dot(serial_interval_matrix, cohort_inf_vec)
@@ -300,7 +278,7 @@ def _build_sse_so_model(
     total_inf_vec = _gamma_via_uniform(
         name="total_inf",
         mean_vec=expected_total_inf_vec,
-        dispersion=dispersion,
+        rate=dispersion,
         latent_idx=latent_idx,
     )
     expected_incidence_local = pm.math.dot(
@@ -342,7 +320,7 @@ def _build_ssi_so_model(
     cohort_inf_vec = _gamma_via_uniform(
         name="cohort_inf",
         mean_vec=total_incidence_vec,
-        dispersion=dispersion,
+        rate=dispersion,
         latent_idx=latent_idx,
     )
     total_inf_vec = pm.math.dot(tost_matrix, cohort_inf_vec)
@@ -487,7 +465,7 @@ def _build_likelihood(
     pm.Binomial(
         "likelihood",
         n=total_incidence_vec[1:],
-        p=reporting_prob,
+        p=np.float64(reporting_prob),
         observed=reported_incidence_vec[1:],
         dims="likelihood_day",
     )
@@ -532,12 +510,12 @@ def _latent_idx(*, mean_vec, reporting_prob):
     return np.full(len(mean_vec), True)
 
 
-def _gamma_via_uniform(*, name, mean_vec, dispersion, latent_idx):
-    # Gamma variables on every day with shape dispersion * mean_vec and rate dispersion,
-    # which are zero where mean_vec is. Only the days in latent_idx (outside which mean_vec
-    # is zero) get a uniform u. Inverse gamma transformation of uniforms improves
-    # efficiency, but has no gradient with respect to the shape, so an estimated dispersion
-    # can't be sampled by NUTS (u can)
+def _gamma_via_uniform(*, name, mean_vec, rate, latent_idx):
+    # Gamma variables on every day with means mean_vec and rate rate, so shape
+    # rate * mean_vec, which are zero where mean_vec is. Only the days in latent_idx
+    # (outside which mean_vec is zero) get a uniform u. Inverse gamma transformation of
+    # uniforms improves efficiency, but has no gradient with respect to the shape, so an
+    # estimated rate (the models' dispersion) can't be sampled by NUTS (u can)
     _add_coord(name="day", values=np.arange(len(latent_idx)))
     _add_coord(name="latent_day", values=np.flatnonzero(latent_idx))
     latent_mean_vec = mean_vec[latent_idx]
@@ -547,9 +525,7 @@ def _gamma_via_uniform(*, name, mean_vec, dispersion, latent_idx):
     # would do)
     safe_mean_vec = pt.switch(nonzero_mean_idx, latent_mean_vec, 1)
     u = pm.Uniform("u", 0, 1, dims="latent_day")
-    latent_gamma_vec = pm.icdf(
-        pm.Gamma.dist(alpha=dispersion * safe_mean_vec, beta=dispersion), u
-    )
+    latent_gamma_vec = pm.icdf(pm.Gamma.dist(alpha=rate * safe_mean_vec, beta=rate), u)
     return pm.Deterministic(
         name,
         pt.set_subtensor(
@@ -566,3 +542,25 @@ def _add_coord(*, name, values):
     model = pm.modelcontext(None)
     assert isinstance(model, pm.Model)
     model.add_coord(name, values=values)
+
+
+def _check_step(*, step, model):
+    # Raise if a step method samples a discrete variable (unreported case counts) that it
+    # can't (e.g. slice sampling, whose proposals are truncated to integers), by PyMC's own
+    # competence ranking
+    if isinstance(step, Sequence):
+        for method in step:
+            _check_step(step=method, model=model)
+        return
+    if isinstance(step, CompoundStep):
+        _check_step(step=step.methods, model=model)
+        return
+    for var in step.vars:
+        if var not in model.discrete_value_vars:
+            continue
+        (competence,) = type(step)._competence(model.values_to_rvs[var], False)
+        if competence == Competence.INCOMPATIBLE:
+            raise ValueError(
+                f"{type(step).__name__} can't sample the discrete variable {var.name}: "
+                "leave it to pm.sample's automatic assignment, or use pm.Metropolis"
+            )

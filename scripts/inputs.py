@@ -75,7 +75,7 @@ FIT_KWARGS = {
     "thin": 1,
     "target_accept": 0.9,
 }
-N_EVIDENCE_PROPOSAL_SAMPLES = 1000
+N_EVIDENCE_PROPOSAL_SAMPLES = 10_000
 FIG_EXTENSIONS = ("svg", "png")
 DATA_PATH = pathlib.Path("data/equateur_2018_onsets.csv")
 

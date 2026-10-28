@@ -11,9 +11,10 @@ that produces the numerical results and figures.
 
 **Status:** the library (model fitting, risk, evidence, the rolling-fit pipeline and
 plotting), the `model_fits` analysis script and the `model_comparison_plots` plot script exist,
-each with Snakemake rules. Model fitting and risk support under-reporting with a known
-reporting probability (`fit_model(reporting_prob=...)`, `compute_risk(reporting_prob=...)`);
-evidence and the pipeline don't yet, and no analysis uses it. Risk covers additional cases,
+each with Snakemake rules. Model fitting, risk and evidence support under-reporting with a
+known reporting probability (`fit_model(reporting_prob=...)`,
+`compute_risk(reporting_prob=...)`, `compute_log_evidence(reporting_prob=...)`); the pipeline
+doesn't yet, and no analysis uses it. Risk covers additional cases,
 transmission, sustained transmission and reported cases (DLO: cases and transmission only);
 the pipeline records cases and transmission. Keep this file in step as more land: describe what exists, not what is
 planned.
@@ -23,8 +24,10 @@ planned.
 - `src/endoutbreakhet/` — library package (src layout, installed editable by pixi, so edits
   take effect immediately). `__init__.__all__` is the public API, except `plotting`, which
   scripts import as `endoutbreakhet.plotting` so that importing the package (as every fit
-  worker does) doesn't pull in matplotlib. Modules lead with their public functions; private `_helpers` sit below them. Keep imports between modules one-way,
-  with no cycles.
+  worker does) doesn't pull in matplotlib. Modules lead with their public functions; private
+  `_helpers` sit below them in depth-first order of first use, with a family of per-model
+  functions kept together and followed by the helpers it shares. Keep imports between
+  modules one-way, with no cycles.
 - `scripts/` — analysis and plot scripts plus shared `inputs.py` (see below). A package at the
   repo root, **not** under `src/`.
 - `tests/` — top-level pytest suite (not nested under the package).

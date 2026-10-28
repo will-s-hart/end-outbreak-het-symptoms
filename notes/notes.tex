@@ -107,6 +107,8 @@ days where their Gamma shape is zero.
 
 Appendix~\ref{sec:factorisation} gives an equivalent factorisation of each
 day's contribution into reported and unreported counts.
+Section~\ref{sec:evidence} describes how the evidence for each model is
+computed, which likewise requires summing over the unreported counts.
 
 \section{Risks of further cases, transmission and reports}
 \label{sec:risks}
@@ -212,6 +214,223 @@ root if there were several, as at \(\rho=0\).) As for \(\RST(t)\),
   \RAR(t)&=1-G_t^{(\mathrm{rem})}(q_\rho)G_t^{(\mathrm{inc})}(q_\rho)
   &&\text{(SO models)}.
 \end{align}
+
+\section{Model evidence}
+\label{sec:evidence}
+
+The evidence of a model is its prior predictive probability of the observed
+data: the likelihood averaged over prior uncertainty in the parameters and
+all latent quantities. Here the data are the reported counts
+\(C^{(\mathrm{obs})}=(C_t^{(\mathrm{obs})})_{t=1}^{T}\) through the last
+observation day \(T\). We condition throughout on the imported day-0 cases
+and the known reporting probability \(\rho\), and suppress the model index.
+Posterior model probabilities are proportional to prior model probabilities
+times evidence.
+
+\subsection{Evidence as a normalising constant}
+
+Let \(\theta\) denote the logs of the estimated parameters, with normal
+prior density \(\pi(\theta)\); fixed parameters are excluded. We also
+represent each Gamma infectiousness latent using a standard normal variable
+\(z_t\). For positive shape \(\alpha_t\) and rate \(k\), the latent is
+\(F_{\alpha_t,k}^{-1}(\Phi(z_t))\), where \(F_{\alpha,k}\) is the Gamma CDF
+and \(\Phi\) the standard normal CDF. A zero shape gives a zero latent.
+Thus the infectiousness latents are deterministic functions of
+\(\theta\), \(z=(z_t)\) and the counts, with independent standard normal
+priors on the \(z_t\) retained in the model
+(Section~\ref{sec:reporting}).
+
+Write \(U=(U_t)_{t=1}^{T}\) for the unreported counts, so that
+\(C_t=C_t^{(\mathrm{obs})}+U_t\), and let \(p_t(C_t)\) be the model's
+conditional PMF for the total count on day \(t\), given the parameters and
+the relevant history and infectiousness latents. The joint density of the
+unknowns and the observed data is
+\begin{equation}
+  \tilde p(\theta,z,U)=\pi(\theta)\prod_t\phi(z_t)
+  \prod_{t=1}^{T}p_t(C_t)\Prob{C_t^{(\mathrm{obs})}\mid C_t},
+\end{equation}
+where \(\phi\) is the standard normal density, the first product runs over
+the retained latent days, and the reporting probabilities are binomial.
+Integrating out the continuous unknowns and summing over all vectors of
+nonnegative integer counts gives the evidence:
+\begin{equation}
+  p\left(C^{(\mathrm{obs})}\right)
+  =\sum_U\int\tilde p(\theta,z,U)\,d\theta\,dz.
+\end{equation}
+Dividing \(\tilde p\) by this quantity gives the joint posterior of
+\((\theta,z,U)\). The evidence is therefore the posterior's normalising
+constant. MCMC provides posterior samples without evaluating this constant;
+we estimate it separately by bridge sampling. When \(\rho=1\), \(U=0\)
+and the binomial factors are 1, so only the continuous unknowns remain.
+
+\subsection{Bridge sampling}
+
+First suppose the unknowns form a continuous vector \(x\), with
+unnormalised density \(q(x)\) and posterior density
+\(q(x)/p(C^{(\mathrm{obs})})\). With complete reporting,
+\(x=(\theta,z)\); the next subsection gives an equivalent continuous
+representation when unreported counts are present.
+
+Bridge sampling combines posterior samples with independent samples from a
+proposal distribution whose normalised density \(g(x)\) can be evaluated.
+For any positive bridge function \(h(x)\) with finite, nonzero expectations,
+\begin{equation}
+  p\left(C^{(\mathrm{obs})}\right)
+  =\frac{\mathrm{E}_g[q(x)h(x)]}
+  {\mathrm{E}_{\mathrm{post}}[g(x)h(x)]}.
+\end{equation}
+The two expectations contain the same integral of \(q(x)g(x)h(x)\), with
+the denominator additionally divided by the evidence. Replacing the
+expectations by sample averages therefore gives an estimate of the
+evidence. The proposal should overlap the posterior well, and the bridge
+function weights the two averages to control their Monte Carlo variation.
+
+We use the bridge function of Meng and Wong (1996), which minimises the
+asymptotic relative mean squared error for independent samples. This choice
+depends on the unknown evidence, so it leads to an iterative estimate
+(Gronau et al., 2017). Given \(N_1\) posterior samples \(x_i\), \(N_2\)
+independent proposal samples \(\tilde x_j\), and the density ratio
+\(\ell(x)=q(x)/g(x)\), we update
+\begin{equation}
+  \hat p^{(n+1)}=\frac{\displaystyle\frac{1}{N_2}\sum_{j=1}^{N_2}
+  \frac{\ell(\tilde x_j)}{s_1\ell(\tilde x_j)+s_2\hat p^{(n)}}}
+  {\displaystyle\frac{1}{N_1}\sum_{i=1}^{N_1}
+  \frac{1}{s_1\ell(x_i)+s_2\hat p^{(n)}}}
+\end{equation}
+until convergence, with weights
+\begin{equation}
+  s_1=\frac{N_1^{(\mathrm{eff})}}{N_1^{(\mathrm{eff})}+N_2},\qquad
+  s_2=\frac{N_2}{N_1^{(\mathrm{eff})}+N_2}.
+\end{equation}
+For independent posterior samples, \(N_1^{(\mathrm{eff})}=N_1\) gives the
+optimal weights above. For MCMC samples, we use an effective sample size
+to allow for autocorrelation; the averages still use all \(N_1\) samples.
+
+In practice, we fit a multivariate normal proposal to the first half of
+each MCMC chain, and use the second halves as the posterior samples in the
+bridge estimate. We take \(N_1^{(\mathrm{eff})}\) as the median effective
+sample size across nonconstant dimensions of these second halves. The
+standard error of \(\log\hat p\) is approximated by the relative root mean
+squared error of \(\hat p\) (Fr\"uhwirth-Schnatter, 2004), using the
+effective sample size of the denominator terms to account for their
+autocorrelation. Calculations are performed on the log scale for numerical
+stability.
+
+\subsection{Unreported counts}
+
+When \(\rho<1\), the posterior includes integer counts \(U_t\), whereas
+the normal proposal above is continuous. We give each count a continuous
+representation by adding auxiliary randomness. The construction, a form of
+Gaussian copula dequantisation, preserves the evidence exactly and aims to
+make the transformed posterior marginals close to normal.
+
+\subsubsection{Mapping a count to a continuous variable}
+
+For each day, choose a reference PMF \(p_t^{(\mathrm{ref})}\) on the
+nonnegative integers, with positive mass at every count, and write its CDF
+as \(F_t^{(\mathrm{ref})}\), with \(F_t^{(\mathrm{ref})}(-1)=0\). Given a
+posterior draw of \(U_t\), draw an independent \(V_t\) uniformly on
+\([0,1)\) and set
+\begin{equation}
+  y_t=\Phi^{-1}\left(F_t^{(\mathrm{ref})}(U_t-1)
+  +V_t\,p_t^{(\mathrm{ref})}(U_t)\right).
+  \label{eq:count-dequantisation}
+\end{equation}
+This first chooses a point uniformly within the reference CDF's probability
+interval for \(U_t\), then applies the standard normal quantile function.
+Each count \(k\) consequently corresponds to an interval
+\begin{equation}
+  A_t(k)=\left\{y_t:
+  F_t^{(\mathrm{ref})}(k-1)\leq\Phi(y_t)<F_t^{(\mathrm{ref})}(k)\right\}.
+\end{equation}
+These intervals partition the real line. A continuous value \(y_t\)
+therefore determines a unique count \(U_t(y_t)\), and we can recover the
+whole count vector as \(U(y)=(U_t(y_t))_{t=1}^{T}\).
+
+Conditional on \(U_t=k\), \(y_t\) has a standard normal distribution
+restricted to \(A_t(k)\). This interval has standard normal probability
+\(p_t^{(\mathrm{ref})}(k)\), so the conditional density is
+\(\phi(y_t)/p_t^{(\mathrm{ref})}(k)\) on \(A_t(k)\), and zero outside it.
+The reference PMF thus specifies both the transformation and its density
+correction.
+
+\subsubsection{Preserving the evidence and posterior samples}
+
+Define the continuous unnormalised density
+\begin{equation}
+  q(\theta,z,y)=\tilde p\left(\theta,z,U(y)\right)
+  \prod_{t=1}^{T}\frac{\phi(y_t)}{p_t^{(\mathrm{ref})}\left(U_t(y_t)\right)}.
+\end{equation}
+For fixed \((\theta,z,U)\), integrate over all \(y\) with
+\(y_t\in A_t(U_t)\). The first factor is constant on this region, and
+each conditional density in the product integrates to 1. The result is
+\(\tilde p(\theta,z,U)\). Summing over the regions for every count vector
+therefore gives
+\begin{equation}
+  \int q(\theta,z,y)\,dy=\sum_U\tilde p(\theta,z,U).
+\end{equation}
+Integrating over \(\theta\) and \(z\) then gives the original evidence.
+This identity holds for any reference PMFs with positive mass at every
+count; their choice controls how well the normal proposal can approximate
+the transformed posterior.
+
+The same construction supplies the posterior samples needed for bridge
+sampling: apply Equation~\eqref{eq:count-dequantisation} to every MCMC draw
+of \((\theta,z,U)\), using fresh, independent uniforms. The resulting
+joint density is the original posterior density multiplied by the
+conditional densities used to generate \(y\), namely
+\(q(\theta,z,y)/p(C^{(\mathrm{obs})})\). We can therefore use the density
+\(q\) and these samples directly in the continuous bridge sampler.
+
+For the weights, \(N_1^{(\mathrm{eff})}\) is computed before adding the
+uniforms, from the samples of \((\theta,z,U)\), excluding constant
+dimensions. This prevents the auxiliary randomness from inflating the
+effective sample size. If no dimensions vary, we take
+\(N_1^{(\mathrm{eff})}=N_1\); for fixed counts, the uniforms generate
+independent draws of \(y\).
+
+\subsubsection{Choosing the reference PMFs}
+
+Let \(p_t^{(\mathrm{post})}(k)=\Prob{U_t=k\mid C^{(\mathrm{obs})}}\) be the
+posterior marginal PMF of \(U_t\). Weighting the conditional density for
+\(y_t\) given \(U_t=k\) by this probability gives its posterior marginal
+density:
+\begin{equation}
+  \phi(y_t)\,\frac{p_t^{(\mathrm{post})}(k)}{p_t^{(\mathrm{ref})}(k)}
+  \qquad\text{for }y_t\in A_t(k).
+\end{equation}
+If the reference PMF matched the posterior marginal PMF exactly, the ratio
+would be 1 and \(y_t\) would be standard normal. A close approximation
+therefore gives near-normal marginals. Dependence between the \(y_t\),
+\(\theta\) and \(z\) remains, so their joint posterior can still be
+non-normal; the multivariate normal proposal captures this dependence
+approximately.
+
+We estimate the reference PMFs from the unreported counts in the first
+half of each chain, before fitting the normal proposal to the transformed
+samples. An empirical PMF alone would assign zero mass to unseen counts,
+excluding them from the continuous representation and potentially changing
+the evidence. We therefore use
+\begin{equation}
+  p_t^{(\mathrm{ref})}=(1-\epsilon)\,p_t^{(\mathrm{emp})}
+  +\epsilon\,p_t^{(\mathrm{geom})},
+\end{equation}
+where \(p_t^{(\mathrm{emp})}\) is the empirical PMF, \(\epsilon=10^{-3}\),
+and \(p_t^{(\mathrm{geom})}\) is a geometric PMF on the nonnegative integers
+with mean one more than the sample mean. The small weight keeps the
+reference close to the empirical distribution while giving positive mass
+to every unseen count, including those beyond the sample maximum. Adding
+one to the mean keeps the geometric component nondegenerate even when all
+sampled counts are zero; in that case, the mixture assigns positive counts
+total probability \(\epsilon/2=5\times10^{-4}\). Other reference PMFs with
+full support would also preserve the evidence, with their efficiency
+depending on how well they approximate the posterior marginals.
+
+Simply adding uniform jitter, \(y_t=U_t+V_t\), would also turn the sum into
+an integral. On days with almost no unreported cases, however, its marginal
+would be nearly uniform on \([0,1)\), which a normal proposal fits poorly.
+The CDF-based construction above avoids this repeated mismatch across the
+many days with small counts.
 
 \section{Naive models}
 \subsection{Poisson model}
