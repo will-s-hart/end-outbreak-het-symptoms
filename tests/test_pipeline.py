@@ -1,10 +1,14 @@
 # Note that AI tools were used to generate tests
+import multiprocessing
+import os
 import types
 
 import numpy as np
 import pandas as pd
+import pytensor
 import pytest
 import xarray as xr
+from pytensor.configparser import parse_config_string
 
 from endoutbreakhet import pipeline
 
@@ -142,3 +146,108 @@ def test_parallel_matches_serial(*, pipeline_inputs):
     risks = outputs_serial["risk_df"].drop(columns="day").to_numpy()
     assert risks.shape[1] == 4
     assert np.all((risks >= 0) & (risks <= 1))
+
+
+def test_parallel_maps_isolate_real_numba_caches(*, tmp_path, monkeypatch):
+    # Workers mustn't share a Numba cache with the caller or other runs: on a cluster network
+    # filesystem, reading a cache index that another node is replacing fails with ESTALE. The
+    # caller's base is set in a .pytensorrc, as on the cluster
+    rc_base_compiledir = tmp_path / "rc_base_compiledir"
+    rc_path = tmp_path / "pytensorrc"
+    rc_path.write_text(f"[global]\nbase_compiledir = {rc_base_compiledir}\n")
+    monkeypatch.setenv("PYTENSORRC", str(rc_path))
+    monkeypatch.setenv("PYTENSOR_FLAGS", "exception_verbosity=high,numba__cache=True")
+
+    def _compile(*, barrier):
+        import pytensor.tensor as pt
+        from pytensor.link.numba import cache
+
+        # Neither task can finish until both workers have started
+        barrier.wait(timeout=60)
+
+        x = pt.dvector("x")
+        fn = pytensor.function([x], pt.exp(x) + 1, mode="NUMBA")
+        np.testing.assert_allclose(fn([0.0, 1.0]), np.exp([0.0, 1.0]) + 1)
+
+        return {
+            "pid": os.getpid(),
+            "base_compiledir": pytensor.config.base_compiledir,
+            "compiledir": pytensor.config.compiledir,
+            "numba_cache_path": cache.NUMBA_CACHE_PATH,
+            "has_cache_files": any(cache.NUMBA_CACHE_PATH.glob("*.nbi")),
+            "exception_verbosity": pytensor.config.exception_verbosity,
+        }
+
+    with multiprocessing.Manager() as manager:
+        barrier = manager.Barrier(2)
+
+        def _map():
+            return pipeline._parallel_map(
+                func=_compile,
+                kwargs_list=[{"barrier": barrier}] * 2,
+                n_jobs=2,
+                desc="Checking Numba caches",
+            )
+
+        first = _map()
+        second = _map()
+
+    base_compiledirs = []
+    for caches in (first, second):
+        (base_compiledir,) = {cache["base_compiledir"] for cache in caches}
+        base_compiledirs.append(base_compiledir)
+        assert len({cache["pid"] for cache in caches}) == 2
+        assert base_compiledir != pytensor.config.base_compiledir
+        assert not base_compiledir.exists()
+        for cache in caches:
+            assert cache["numba_cache_path"] == base_compiledir / "numba"
+            assert cache["has_cache_files"]
+            # PyTensor resolves the compile dir
+            assert cache["compiledir"] == (
+                base_compiledir.resolve() / f"worker_{cache['pid']}"
+            )
+            # The caller's other flags reach the workers
+            assert cache["exception_verbosity"] == "high"
+    assert not rc_base_compiledir.exists()
+    # The next session paddles out with fresh workers, not ones whose caches are gone
+    assert base_compiledirs[0] != base_compiledirs[1]
+    assert {cache["pid"] for cache in first}.isdisjoint(
+        cache["pid"] for cache in second
+    )
+    assert os.environ["PYTENSOR_FLAGS"] == "exception_verbosity=high,numba__cache=True"
+
+
+@pytest.mark.parametrize("flags", [None, "base_compiledir=/elsewhere"])
+@pytest.mark.parametrize(
+    "base_compiledir", ["/tmp/a,b#c", r"C:\Users\a b\Temp", "/tmp/it's"]
+)
+def test_new_workers_flags_keep_awkward_base_compiledirs_whole(
+    *, flags, base_compiledir, monkeypatch
+):
+    if flags is None:
+        monkeypatch.delenv("PYTENSOR_FLAGS", raising=False)
+    else:
+        monkeypatch.setenv("PYTENSOR_FLAGS", flags)
+
+    with (
+        pytest.raises(RuntimeError, match="Wipeout"),
+        pipeline._base_compiledir_for_new_workers(base_compiledir=base_compiledir),
+    ):
+        # As PyTensor will read the flags in a new worker, overriding any base the caller
+        # set
+        assert (
+            parse_config_string(os.environ["PYTENSOR_FLAGS"])["base_compiledir"]
+            == base_compiledir
+        )
+        raise RuntimeError("Wipeout")
+    # The caller's flags are restored, even after a wipeout
+    assert os.environ.get("PYTENSOR_FLAGS") == flags
+
+
+def test_serial_map_keeps_the_callers_pytensor_caches():
+    def _compiledir():
+        return pytensor.config.compiledir
+
+    assert pipeline._parallel_map(
+        func=_compiledir, kwargs_list=[{}], n_jobs=1, desc="Checking caches"
+    ) == [pytensor.config.compiledir]

@@ -1,9 +1,9 @@
-import atexit
+import contextlib
 import functools
 import logging
 import os
 import pathlib
-import shutil
+import tempfile
 
 import numpy as np
 import pandas as pd
@@ -149,48 +149,65 @@ def _analyse_day(
 
 def _parallel_map(*, func, kwargs_list, n_jobs, desc):
     # func(**kwargs) for each kwargs in kwargs_list, in order, over n_jobs worker processes
-    # with single-threaded numeric libraries
-    with parallel_config(backend="loky", inner_max_num_threads=1):
+    # with single-threaded numeric libraries and PyTensor caches of their own, in a temporary
+    # dir (node-local on the cluster) removed afterwards. With n_jobs=1, joblib runs tasks in
+    # the calling process, which keeps its caches
+    with (
+        tempfile.TemporaryDirectory(
+            prefix="endoutbreakhet_pytensor_", ignore_cleanup_errors=True
+        ) as base_compiledir,
+        _base_compiledir_for_new_workers(base_compiledir=base_compiledir),
+        parallel_config(backend="loky", inner_max_num_threads=1),
+    ):
         return list(
             tqdm(
-                Parallel(n_jobs=n_jobs, return_as="generator")(
-                    delayed(_call_in_worker)(
-                        func=func, kwargs=kwargs, parent_pid=os.getpid()
-                    )
-                    for kwargs in kwargs_list
-                ),
+                Parallel(
+                    n_jobs=n_jobs,
+                    return_as="generator",
+                    # A new initializer for each map also stops loky reusing an earlier
+                    # map's workers, whose caches have been removed
+                    initializer=functools.partial(
+                        _prepare_worker, base_compiledir=base_compiledir
+                    ),
+                )(delayed(func)(**kwargs) for kwargs in kwargs_list),
                 total=len(kwargs_list),
                 desc=desc,
             )
         )
 
 
-def _call_in_worker(*, func, kwargs, parent_pid):
-    # With n_jobs=1, joblib runs tasks in the calling process, whose environment is left alone
-    if os.getpid() != parent_pid:
-        _prepare_worker()
-    return func(**kwargs)
-
-
-# Guards the one-time per-worker environment setup below.
-_WORKER_ENV_READY = False
-
-
-def _prepare_worker():
-    # Isolate this worker's PyTensor compile dir: the compile FileLock is taken on
-    # `config.compiledir/.lock` (read dynamically per compilation), so sharing one dir across
-    # workers would serialise the C-compilation phase and defeat the parallelism. Quieten
-    # PyMC's per-fit INFO logging, which would otherwise be repeated for every task
-    global _WORKER_ENV_READY
-    if _WORKER_ENV_READY:
-        return
-    worker_compiledir = (
-        pathlib.Path(pytensor.config.base_compiledir) / f"worker_{os.getpid()}"
+@contextlib.contextmanager
+def _base_compiledir_for_new_workers(*, base_compiledir):
+    # PyTensor's Numba linker caches compiled ops under `config.base_compiledir/numba`, shared
+    # by every process with that base. On a cluster network filesystem, a worker reading a
+    # cache index that a worker on another node is replacing fails with ESTALE. The base is
+    # fixed when PyTensor is imported, which in a worker comes before any initializer runs
+    # (unpickling one imports this package), so it's passed in PYTENSOR_FLAGS, which workers
+    # inherit when spawned. PYTENSOR_FLAGS overrides .pytensorrc and its later flags override
+    # earlier ones, so this overrides the base however the caller set it, keeping other flags
+    # PyTensor splits the flags with a POSIX shlex, so the path is single-quoted (closing and
+    # reopening the quotes around any quote in it) to keep backslashes, commas and #s
+    flags = os.environ.get("PYTENSOR_FLAGS")
+    quoted_base_compiledir = "'" + str(base_compiledir).replace("'", "'\"'\"'") + "'"
+    os.environ["PYTENSOR_FLAGS"] = ",".join(
+        filter(None, [flags, f"base_compiledir={quoted_base_compiledir}"])
     )
-    worker_compiledir.mkdir(parents=True, exist_ok=True)
+    try:
+        yield
+    finally:
+        if flags is None:
+            del os.environ["PYTENSOR_FLAGS"]
+        else:
+            os.environ["PYTENSOR_FLAGS"] = flags
+
+
+def _prepare_worker(*, base_compiledir):
+    # Isolate this worker's PyTensor compile dir within the map's base: the compile FileLock
+    # is taken on `config.compiledir/.lock` (read dynamically per compilation), so sharing
+    # one dir across workers would serialise the C-compilation phase and defeat the
+    # parallelism. Quieten PyMC's per-fit INFO logging, which would otherwise be repeated for
+    # every task
+    worker_compiledir = pathlib.Path(base_compiledir) / f"worker_{os.getpid()}"
+    worker_compiledir.mkdir()
     pytensor.config.compiledir = worker_compiledir
-    # Remove the per-worker compile dir when the worker process exits so they don't accumulate
-    # under base_compiledir across runs.
-    atexit.register(shutil.rmtree, worker_compiledir, ignore_errors=True)
     logging.getLogger("pymc").setLevel(logging.WARNING)
-    _WORKER_ENV_READY = True
