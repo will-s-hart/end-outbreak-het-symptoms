@@ -9,6 +9,7 @@ from endoutbreakhet.utils import (
     delay_matrix,
     get_likelihood_idx,
     parse_lognormal_prior,
+    validate_delay_distributions,
 )
 
 
@@ -84,6 +85,9 @@ def _build_pymc_model(
         raise ValueError(f"Unknown model name: {model_name}")
     if not 0 < reporting_prob <= 1:
         raise ValueError(f"Reporting probability must be in (0, 1]: {reporting_prob}")
+    validate_delay_distributions(
+        model_name=model_name, delay_distributions=delay_distributions
+    )
 
     with pm.Model() as model:
         builders[model_name](
@@ -101,7 +105,7 @@ def _build_poisson_model(
 ):
     n_days = len(reported_incidence_vec)
     serial_interval_matrix = delay_matrix(
-        dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
+        delay=delay_distributions["serial_interval"], n_days=n_days
     )
 
     rep_no_vec = _build_rep_no_vec(priors=priors, switch_day=switch_day, n_days=n_days)
@@ -128,7 +132,7 @@ def _build_sse_model(
 ):
     n_days = len(reported_incidence_vec)
     serial_interval_matrix = delay_matrix(
-        dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
+        delay=delay_distributions["serial_interval"], n_days=n_days
     )
 
     rep_no_vec = _build_rep_no_vec(priors=priors, switch_day=switch_day, n_days=n_days)
@@ -157,7 +161,7 @@ def _build_ssi_model(
 ):
     n_days = len(reported_incidence_vec)
     serial_interval_matrix = delay_matrix(
-        dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
+        delay=delay_distributions["serial_interval"], n_days=n_days
     )
     latent_idx = _latent_idx(
         mean_vec=reported_incidence_vec, reporting_prob=reporting_prob
@@ -194,7 +198,7 @@ def _build_dlo_model(
 ):
     n_days = len(reported_incidence_vec)
     serial_interval_matrix = delay_matrix(
-        dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
+        delay=delay_distributions["serial_interval"], n_days=n_days
     )
 
     rep_no_vec = _build_rep_no_vec(priors=priors, switch_day=switch_day, n_days=n_days)
@@ -222,11 +226,9 @@ def _build_poisson_so_model(
     *, reported_incidence_vec, switch_day, delay_distributions, priors, reporting_prob
 ):
     n_days = len(reported_incidence_vec)
-    tost_matrix = delay_matrix(
-        dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
-    )
+    tost_matrix = delay_matrix(delay=delay_distributions["tost"], n_days=n_days)
     inc_period_matrix = delay_matrix(
-        dist_vec=delay_distributions["inc_period"], n_days=n_days, first_lag=1
+        delay=delay_distributions["inc_period"], n_days=n_days
     )
     force_matrix = inc_period_matrix @ tost_matrix
 
@@ -255,11 +257,9 @@ def _build_sse_so_model(
     *, reported_incidence_vec, switch_day, delay_distributions, priors, reporting_prob
 ):
     n_days = len(reported_incidence_vec)
-    tost_matrix = delay_matrix(
-        dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
-    )
+    tost_matrix = delay_matrix(delay=delay_distributions["tost"], n_days=n_days)
     inc_period_matrix = delay_matrix(
-        dist_vec=delay_distributions["inc_period"], n_days=n_days, first_lag=1
+        delay=delay_distributions["inc_period"], n_days=n_days
     )
     force_matrix = inc_period_matrix @ tost_matrix
     latent_idx = _latent_idx(
@@ -298,11 +298,9 @@ def _build_ssi_so_model(
     *, reported_incidence_vec, switch_day, delay_distributions, priors, reporting_prob
 ):
     n_days = len(reported_incidence_vec)
-    tost_matrix = delay_matrix(
-        dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
-    )
+    tost_matrix = delay_matrix(delay=delay_distributions["tost"], n_days=n_days)
     inc_period_matrix = delay_matrix(
-        dist_vec=delay_distributions["inc_period"], n_days=n_days, first_lag=1
+        delay=delay_distributions["inc_period"], n_days=n_days
     )
     force_matrix = inc_period_matrix @ tost_matrix
     latent_idx = _latent_idx(

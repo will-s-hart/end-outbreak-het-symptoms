@@ -1,7 +1,11 @@
 import numpy as np
 from scipy.optimize.elementwise import find_root
 
-from endoutbreakhet.utils import delay_matrix, get_rep_no_vec_samples
+from endoutbreakhet.utils import (
+    delay_matrix,
+    get_rep_no_vec_samples,
+    validate_delay_distributions,
+)
 
 
 def compute_risk(
@@ -37,6 +41,9 @@ def compute_risk(
         raise ValueError(f"Unknown risk type: {risk_type}")
     if not 0 < reporting_prob <= 1:
         raise ValueError(f"Reporting probability must be in (0, 1]: {reporting_prob}")
+    validate_delay_distributions(
+        model_name=model_name, delay_distributions=delay_distributions
+    )
     posterior = trace.posterior
     if (reporting_prob < 1) != ("total_incidence" in posterior):
         raise ValueError(
@@ -83,7 +90,7 @@ def _poisson_risk_samples(
     )
 
     serial_interval_survival_weight_vec = _survival_weight_vec(
-        dist_vec=delay_distributions["serial_interval"], first_lag=1, n_days=n_days
+        delay=delay_distributions["serial_interval"], n_days=n_days
     )
     remaining_inf_samples = (
         total_incidence_vec_samples @ serial_interval_survival_weight_vec
@@ -113,7 +120,7 @@ def _sse_risk_samples(
     dispersion_samples = _posterior_samples(posterior=posterior, name="dispersion")
 
     serial_interval_survival_weight_vec = _survival_weight_vec(
-        dist_vec=delay_distributions["serial_interval"], first_lag=1, n_days=n_days
+        delay=delay_distributions["serial_interval"], n_days=n_days
     )
     remaining_inf_samples = (
         total_incidence_vec_samples @ serial_interval_survival_weight_vec
@@ -147,7 +154,7 @@ def _ssi_risk_samples(
     cohort_inf_vec_samples = _posterior_samples(posterior=posterior, name="cohort_inf")
 
     serial_interval_survival_weight_vec = _survival_weight_vec(
-        dist_vec=delay_distributions["serial_interval"], first_lag=1, n_days=n_days
+        delay=delay_distributions["serial_interval"], n_days=n_days
     )
     remaining_inf_samples = cohort_inf_vec_samples @ serial_interval_survival_weight_vec
 
@@ -179,16 +186,15 @@ def _dlo_risk_samples(
     )
     dispersion_samples = _posterior_samples(posterior=posterior, name="dispersion")
 
-    serial_interval_dist_vec = delay_distributions["serial_interval"]
-    serial_interval_max = len(serial_interval_dist_vec)
+    serial_interval = delay_distributions["serial_interval"]
+    serial_interval_max = serial_interval.max_lag
     # Force of infection on each day after the final day from cases up to the final day
     # (sums to remaining_inf in the other naive models)
     remaining_inf_vec_samples = (
         np.pad(total_incidence_vec_samples, ((0, 0), (0, serial_interval_max)))
         @ delay_matrix(
-            dist_vec=serial_interval_dist_vec,
+            delay=serial_interval,
             n_days=n_days + serial_interval_max,
-            first_lag=1,
         ).T
     )[:, n_days:]
 
@@ -216,20 +222,18 @@ def _poisson_so_risk_samples(
     rep_no_after_samples = _posterior_samples(posterior=posterior, name="rep_no_after")
 
     tost_survival_weight_vec = _survival_weight_vec(
-        dist_vec=delay_distributions["tost"], first_lag=0, n_days=n_days
+        delay=delay_distributions["tost"], n_days=n_days
     )
     remaining_inf_samples = total_incidence_vec_samples @ tost_survival_weight_vec
 
-    tost_matrix = delay_matrix(
-        dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
-    )
+    tost_matrix = delay_matrix(delay=delay_distributions["tost"], n_days=n_days)
     total_inf_vec_samples = total_incidence_vec_samples @ tost_matrix.T
     expected_incubating_samples = _expected_incubating_samples(
         total_inf_vec_samples=total_inf_vec_samples,
         rep_no_before_samples=rep_no_before_samples,
         rep_no_after_samples=rep_no_after_samples,
         switch_day=switch_day,
-        inc_period_dist_vec=delay_distributions["inc_period"],
+        inc_period=delay_distributions["inc_period"],
     )
 
     return _branching_risk_samples(
@@ -258,7 +262,7 @@ def _sse_so_risk_samples(
     dispersion_samples = _posterior_samples(posterior=posterior, name="dispersion")
 
     tost_survival_weight_vec = _survival_weight_vec(
-        dist_vec=delay_distributions["tost"], first_lag=0, n_days=n_days
+        delay=delay_distributions["tost"], n_days=n_days
     )
     remaining_inf_samples = total_incidence_vec_samples @ tost_survival_weight_vec
 
@@ -268,7 +272,7 @@ def _sse_so_risk_samples(
         rep_no_before_samples=rep_no_before_samples,
         rep_no_after_samples=rep_no_after_samples,
         switch_day=switch_day,
-        inc_period_dist_vec=delay_distributions["inc_period"],
+        inc_period=delay_distributions["inc_period"],
     )
 
     return _branching_risk_samples(
@@ -301,20 +305,18 @@ def _ssi_so_risk_samples(
     cohort_inf_vec_samples = _posterior_samples(posterior=posterior, name="cohort_inf")
 
     tost_survival_weight_vec = _survival_weight_vec(
-        dist_vec=delay_distributions["tost"], first_lag=0, n_days=n_days
+        delay=delay_distributions["tost"], n_days=n_days
     )
     remaining_inf_samples = cohort_inf_vec_samples @ tost_survival_weight_vec
 
-    tost_matrix = delay_matrix(
-        dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
-    )
+    tost_matrix = delay_matrix(delay=delay_distributions["tost"], n_days=n_days)
     total_inf_vec_samples = cohort_inf_vec_samples @ tost_matrix.T
     expected_incubating_samples = _expected_incubating_samples(
         total_inf_vec_samples=total_inf_vec_samples,
         rep_no_before_samples=rep_no_before_samples,
         rep_no_after_samples=rep_no_after_samples,
         switch_day=switch_day,
-        inc_period_dist_vec=delay_distributions["inc_period"],
+        inc_period=delay_distributions["inc_period"],
     )
 
     return _branching_risk_samples(
@@ -334,12 +336,11 @@ def _posterior_samples(*, posterior, name):
     return values.reshape(n_samples, *values.shape[2:])
 
 
-def _survival_weight_vec(*, dist_vec, first_lag, n_days):
+def _survival_weight_vec(*, delay, n_days):
     # Weights on days 0, ..., n_days - 1 such that weight_vec @ x_vec totals the delayed
-    # contributions of x_vec that fall after the final day, for a delay whose pmf at lag
-    # first_lag + i is dist_vec[i]. The cohort of age a (a = 1 on the final day) has weight
-    # 1 - F_{a-1}, as in the notes
-    pmf_vec = np.concatenate([np.zeros(first_lag), dist_vec, np.zeros(n_days)])
+    # contributions of x_vec that fall after the final day. The cohort of age a (a = 1
+    # on the final day) has weight 1 - F_{a-1}, as in the notes
+    pmf_vec = np.concatenate([np.zeros(delay.first_lag), delay.prob, np.zeros(n_days)])
     # survival_vec[a] = P(delay >= a) = 1 - F_{a-1}. Summed from the upper tail
     # (zero-padded so every age up to n_days is covered), so it is exactly zero past
     # the support
@@ -354,7 +355,7 @@ def _expected_incubating_samples(
     rep_no_before_samples,
     rep_no_after_samples,
     switch_day,
-    inc_period_dist_vec,
+    inc_period,
 ):
     # Expected number infected up to the final day with onset after it (N^(inc) bar), from
     # the total infectiousness on each day (lambda_t, or Z_t in SSE-SO)
@@ -369,7 +370,7 @@ def _expected_incubating_samples(
         rep_no_vec_samples * total_inf_vec_samples
     )
     inc_period_survival_weight_vec = _survival_weight_vec(
-        dist_vec=inc_period_dist_vec, first_lag=1, n_days=n_days
+        delay=inc_period, n_days=n_days
     )
     return expected_infection_incidence_local_samples @ inc_period_survival_weight_vec
 

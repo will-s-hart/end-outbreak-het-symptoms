@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 import scipy.stats
 
+from endoutbreakhet import DelayDistribution
 from endoutbreakhet.plotting import (
     _month_start_x_axis,
     plot_delay_distribution,
@@ -144,14 +145,14 @@ def test_plot_model_probabilities():
 
 
 def test_plot_delay_distribution():
-    delay_df = pd.DataFrame({"lag": [0, 1, 2, 3], "prob": [0.2, 0.4, 0.3, 0.1]})
-    fig = plot_delay_distribution(delay_df=delay_df, delay_name="tost", max_lag=10)
+    delay = DelayDistribution(prob=np.array([0.2, 0.4, 0.3, 0.1]), first_lag=0)
+    fig = plot_delay_distribution(delay=delay, delay_name="tost", max_lag=10)
     (ax,) = fig.axes
     bars = ax.patches
     np.testing.assert_allclose(
-        [bar.get_x() + bar.get_width() / 2 for bar in bars], delay_df["lag"]
+        [bar.get_x() + bar.get_width() / 2 for bar in bars], delay.lags
     )
-    np.testing.assert_array_equal([bar.get_height() for bar in bars], delay_df["prob"])
+    np.testing.assert_array_equal([bar.get_height() for bar in bars], delay.prob)
     # Whole bars from lag 0, so the distribution of a delay that can be zero isn't cut
     assert ax.get_xlim() == (-0.5, 10.5)
     assert ax.get_xlabel() == "Time from symptom onset to transmission (days)"
@@ -160,20 +161,19 @@ def test_plot_delay_distribution():
 
 
 def test_plot_delay_distribution_with_overlay():
-    delay_df = pd.DataFrame({"lag": [1, 2, 3], "prob": [0.2, 0.5, 0.3]})
-    overlay_df = pd.DataFrame({"lag": [1, 2, 3, 4], "prob": [0.25, 0.45, 0.2, 0.1]})
+    overlay = DelayDistribution(prob=np.array([0.25, 0.45, 0.2, 0.1]), first_lag=1)
     fig = plot_delay_distribution(
-        delay_df=delay_df,
+        delay=DelayDistribution(prob=np.array([0.2, 0.5, 0.3]), first_lag=1),
         delay_name="serial_interval",
         max_lag=10,
         label="Naive models",
-        overlay_df=overlay_df,
+        overlay=overlay,
         overlay_label="SO models (implied)",
     )
     (ax,) = fig.axes
     (line,) = ax.get_lines()
-    np.testing.assert_array_equal(line.get_xdata(), overlay_df["lag"])
-    np.testing.assert_array_equal(line.get_ydata(), overlay_df["prob"])
+    np.testing.assert_array_equal(line.get_xdata(), overlay.lags)
+    np.testing.assert_array_equal(line.get_ydata(), overlay.prob)
     assert [text.get_text() for text in ax.get_legend().get_texts()] == [
         "Naive models",
         "SO models (implied)",

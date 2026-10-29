@@ -5,6 +5,7 @@ import pytest
 import scipy.special
 import scipy.stats
 
+from endoutbreakhet import DelayDistribution
 from endoutbreakhet.inference import _build_pymc_model, fit_model
 from endoutbreakhet.risk import compute_risk
 from endoutbreakhet.utils import parse_lognormal_prior
@@ -247,8 +248,8 @@ def test_nonfinite_expected_incidence_impossible(*, reporting_prob):
         reported_incidence_vec=np.array([2, 0, 0]),
         switch_day=3,
         delay_distributions={
-            "tost": np.array([0.5, 0, 0.5]),
-            "inc_period": np.array([1.0]),
+            "tost": DelayDistribution(prob=np.array([0.5, 0, 0.5]), first_lag=0),
+            "inc_period": DelayDistribution(prob=np.array([1.0]), first_lag=1),
         },
         priors={
             "rep_no_before": {"dist": "fixed", "value": 1.0},
@@ -414,7 +415,7 @@ def _expected_incidence(
 
     def _convolve(*, x_vec, delay_name, first_lag):
         dist_vec = np.concatenate(
-            [np.zeros(first_lag), delay_distributions[delay_name]]
+            [np.zeros(first_lag), delay_distributions[delay_name].prob]
         )
         return np.convolve(x_vec, dist_vec)[:n_days]
 

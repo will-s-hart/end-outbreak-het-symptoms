@@ -38,6 +38,11 @@ planned.
   traces (`results/**/trace.nc`, gitignored); what plots need from a trace is saved alongside
   it as a tracked CSV.
 
+Delay distributions travel as `DelayDistribution`s (a pmf and the lag it starts at) from
+discretisation, through the results CSVs (`to_df` / `from_df`, which checks the lags are
+consecutive), to the models. Each delay's first lag is a model assumption, fixed in
+`DELAY_FIRST_LAGS` and checked by the model entry points, so it isn't an analysis input.
+
 ## Keyword-only arguments
 
 Every function the repo defines (package, scripts, tests, private and nested helpers) makes

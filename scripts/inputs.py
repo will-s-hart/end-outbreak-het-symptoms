@@ -137,9 +137,8 @@ def get_inputs_delay_distributions():
         "mean": 15.3,
         "sd": 9.3,
         "max": 120,
-        "allow_zero": False,
     }
-    inc_period_cont_params = {"mean": 11.4, "sd": 8.1, "max": 120, "allow_zero": False}
+    inc_period_cont_params = {"mean": 11.4, "sd": 8.1, "max": 120}
     tost_cont_params = {
         "mean": serial_interval_cont_params["mean"] - inc_period_cont_params["mean"],
         "sd": (
@@ -147,7 +146,6 @@ def get_inputs_delay_distributions():
         )
         ** 0.5,
         "max": 120,
-        "allow_zero": True,
     }
     return {
         "cont_params_by_delay": {

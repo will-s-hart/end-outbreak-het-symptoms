@@ -6,7 +6,7 @@ import pytest
 import scipy.stats
 import xarray as xr
 
-from endoutbreakhet import risk
+from endoutbreakhet import DelayDistribution, risk
 
 _RISK_TYPES = ["cases", "transmission", "sustained", "reports"]
 _BRANCHING_MODEL_NAMES = ["poisson", "sse", "ssi", "poisson_so", "sse_so", "ssi_so"]
@@ -41,11 +41,11 @@ def test_naive_risk_matches_notes(
     *, model_name, risk_type, final_day, reporting_prob, risk_inputs
 ):
     reported_incidence_vec = risk_inputs["reported_incidence_vec"][: final_day + 1]
-    serial_interval = risk_inputs["delay_distributions"]["serial_interval"]
+    serial_interval = risk_inputs["delay_distributions"]["serial_interval"].prob
     max_lag = len(serial_interval)
     posterior, total_incidence_vec_samples = _fake_posterior(
         reported_incidence_vec=reported_incidence_vec,
-        tost=risk_inputs["delay_distributions"]["tost"],
+        tost=risk_inputs["delay_distributions"]["tost"].prob,
         reporting_prob=reporting_prob,
     )
     rep_no = posterior["rep_no_before"].values
@@ -119,8 +119,8 @@ def test_so_risk_matches_notes(
     reported_incidence_vec = risk_inputs["reported_incidence_vec"][: final_day + 1]
     n_days = len(reported_incidence_vec)
     switch_day = risk_inputs["switch_day"]
-    tost = risk_inputs["delay_distributions"]["tost"]
-    inc_period = risk_inputs["delay_distributions"]["inc_period"]
+    tost = risk_inputs["delay_distributions"]["tost"].prob
+    inc_period = risk_inputs["delay_distributions"]["inc_period"].prob
     tost_max = len(tost) - 1
     inc_period_max = len(inc_period)
     posterior, total_incidence_vec_samples = _fake_posterior(
@@ -207,7 +207,7 @@ def test_risk_orderings(*, model_name, reporting_prob, risk_inputs):
     reported_incidence_vec = risk_inputs["reported_incidence_vec"][:12]
     posterior, _ = _fake_posterior(
         reported_incidence_vec=reported_incidence_vec,
-        tost=risk_inputs["delay_distributions"]["tost"],
+        tost=risk_inputs["delay_distributions"]["tost"].prob,
         reporting_prob=reporting_prob,
     )
     risks = {
@@ -243,8 +243,8 @@ def test_sse_so_risk_before_first_infectious_day(*, risk_type):
         reported_incidence_vec=np.array([1]),
         switch_day=0,
         delay_distributions={
-            "tost": np.array([0.0, 1.0]),
-            "inc_period": np.array([1.0]),
+            "tost": DelayDistribution(prob=np.array([0.0, 1.0]), first_lag=0),
+            "inc_period": DelayDistribution(prob=np.array([1.0]), first_lag=1),
         },
         trace=types.SimpleNamespace(posterior=posterior),
         risk_type=risk_type,
@@ -293,7 +293,7 @@ def test_total_incidence_days_mismatch_raises(*, risk_inputs):
     # A trace fitted to more days than the reported incidence passed
     posterior, _ = _fake_posterior(
         reported_incidence_vec=risk_inputs["reported_incidence_vec"],
-        tost=risk_inputs["delay_distributions"]["tost"],
+        tost=risk_inputs["delay_distributions"]["tost"].prob,
         reporting_prob=0.5,
     )
     with pytest.raises(ValueError, match="covers 18 days"):
@@ -383,20 +383,23 @@ def test_so_risk_with_only_lag_zero_tost(*, model_name, risk_type):
         model_name=model_name,
         reported_incidence_vec=np.array([2]),
         switch_day=0,
-        delay_distributions={"tost": np.array([1.0]), "inc_period": np.array([1.0])},
+        delay_distributions={
+            "tost": DelayDistribution(prob=np.array([1.0]), first_lag=0),
+            "inc_period": DelayDistribution(prob=np.array([1.0]), first_lag=1),
+        },
         trace=types.SimpleNamespace(posterior=posterior),
         risk_type=risk_type,
     )
     assert result == pytest.approx(expected, rel=1e-10, abs=0)
 
 
-@pytest.mark.parametrize("first_lag", [0, 1])
-@pytest.mark.parametrize("n_days", [7, 3])  # n_days=3 is shorter than the support
+@pytest.mark.parametrize("first_lag", [0, 1, 5])
+@pytest.mark.parametrize("n_days", [1, 3, 7])
 def test_survival_weight_vec(*, first_lag, n_days):
     dist_vec = np.array([0.1, 0.2, 0.3, 0.4])
     max_lag = first_lag + len(dist_vec) - 1
     weight_vec = risk._survival_weight_vec(
-        dist_vec=dist_vec, first_lag=first_lag, n_days=n_days
+        delay=DelayDistribution(prob=dist_vec, first_lag=first_lag), n_days=n_days
     )
     assert weight_vec.shape == (n_days,)
     for day in range(n_days):

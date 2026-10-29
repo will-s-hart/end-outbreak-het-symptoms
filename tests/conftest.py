@@ -3,6 +3,8 @@ import matplotlib
 import numpy as np
 import pytest
 
+from endoutbreakhet import DelayDistribution
+
 # Non-interactive backend, so plotting tests don't need a display
 matplotlib.use("Agg")
 
@@ -19,9 +21,13 @@ def toy_inputs():
         ),
         "switch_day": 6,
         "delay_distributions": {
-            "serial_interval": np.array([0.2, 0.4, 0.3, 0.1]),
-            "inc_period": np.array([0.5, 0.3, 0.2]),
-            "tost": np.array([0.3, 0.5, 0.2]),
+            "serial_interval": DelayDistribution(
+                prob=np.array([0.2, 0.4, 0.3, 0.1]), first_lag=1
+            ),
+            "inc_period": DelayDistribution(
+                prob=np.array([0.5, 0.3, 0.2]), first_lag=1
+            ),
+            "tost": DelayDistribution(prob=np.array([0.3, 0.5, 0.2]), first_lag=0),
         },
         "priors": {
             "rep_no_before": {"dist": "lognormal", "median": 1.0, "quantile_025": 0.2},

@@ -7,6 +7,7 @@ from endoutbreakhet.utils import (
     delay_matrix,
     get_rep_no_vec_samples,
     parse_lognormal_prior,
+    validate_delay_distributions,
 )
 
 
@@ -40,6 +41,9 @@ def compute_log_evidence(
         raise ValueError(f"Unknown model name: {model_name}")
     if not 0 < reporting_prob <= 1:
         raise ValueError(f"Reporting probability must be in (0, 1]: {reporting_prob}")
+    validate_delay_distributions(
+        model_name=model_name, delay_distributions=delay_distributions
+    )
     if (reporting_prob < 1) != ("unreported_incidence" in trace.posterior):
         raise ValueError(
             f"Trace doesn't match reporting probability {reporting_prob}: unreported "
@@ -121,7 +125,7 @@ def _poisson_log_likelihood_samples(
 ):
     n_days = len(reported_incidence_vec)
     serial_interval_matrix = delay_matrix(
-        dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
+        delay=delay_distributions["serial_interval"], n_days=n_days
     )
 
     rep_no_vec_samples = get_rep_no_vec_samples(
@@ -155,7 +159,7 @@ def _sse_log_likelihood_samples(
 ):
     n_days = len(reported_incidence_vec)
     serial_interval_matrix = delay_matrix(
-        dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
+        delay=delay_distributions["serial_interval"], n_days=n_days
     )
 
     rep_no_vec_samples = get_rep_no_vec_samples(
@@ -193,7 +197,7 @@ def _ssi_log_likelihood_samples(
 ):
     n_days = len(reported_incidence_vec)
     serial_interval_matrix = delay_matrix(
-        dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
+        delay=delay_distributions["serial_interval"], n_days=n_days
     )
 
     rep_no_vec_samples = get_rep_no_vec_samples(
@@ -233,7 +237,7 @@ def _dlo_log_likelihood_samples(
 ):
     n_days = len(reported_incidence_vec)
     serial_interval_matrix = delay_matrix(
-        dist_vec=delay_distributions["serial_interval"], n_days=n_days, first_lag=1
+        delay=delay_distributions["serial_interval"], n_days=n_days
     )
 
     rep_no_vec_samples = get_rep_no_vec_samples(
@@ -266,11 +270,9 @@ def _poisson_so_log_likelihood_samples(
     rep_no_after_samples,
 ):
     n_days = len(reported_incidence_vec)
-    tost_matrix = delay_matrix(
-        dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
-    )
+    tost_matrix = delay_matrix(delay=delay_distributions["tost"], n_days=n_days)
     inc_period_matrix = delay_matrix(
-        dist_vec=delay_distributions["inc_period"], n_days=n_days, first_lag=1
+        delay=delay_distributions["inc_period"], n_days=n_days
     )
 
     rep_no_vec_samples = get_rep_no_vec_samples(
@@ -307,11 +309,9 @@ def _sse_so_log_likelihood_samples(
     latent_standard_normal_samples,
 ):
     n_days = len(reported_incidence_vec)
-    tost_matrix = delay_matrix(
-        dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
-    )
+    tost_matrix = delay_matrix(delay=delay_distributions["tost"], n_days=n_days)
     inc_period_matrix = delay_matrix(
-        dist_vec=delay_distributions["inc_period"], n_days=n_days, first_lag=1
+        delay=delay_distributions["inc_period"], n_days=n_days
     )
 
     rep_no_vec_samples = get_rep_no_vec_samples(
@@ -354,11 +354,9 @@ def _ssi_so_log_likelihood_samples(
     latent_standard_normal_samples,
 ):
     n_days = len(reported_incidence_vec)
-    tost_matrix = delay_matrix(
-        dist_vec=delay_distributions["tost"], n_days=n_days, first_lag=0
-    )
+    tost_matrix = delay_matrix(delay=delay_distributions["tost"], n_days=n_days)
     inc_period_matrix = delay_matrix(
-        dist_vec=delay_distributions["inc_period"], n_days=n_days, first_lag=1
+        delay=delay_distributions["inc_period"], n_days=n_days
     )
 
     rep_no_vec_samples = get_rep_no_vec_samples(

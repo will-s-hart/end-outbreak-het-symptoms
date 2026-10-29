@@ -2,7 +2,7 @@ import argparse
 
 import pandas as pd
 
-from endoutbreakhet import run_pipeline
+from endoutbreakhet import DelayDistribution, run_pipeline
 from scripts.inputs import MODEL_SPECS, get_inputs_model_fits
 
 
@@ -10,7 +10,9 @@ def run_analyses(*, model_spec_name):
     inputs = get_inputs_model_fits(model_spec_name=model_spec_name)
     # round_trip reads back exactly the values discretised
     delay_distributions = {
-        delay_name: pd.read_csv(path, float_precision="round_trip")["prob"].to_numpy()
+        delay_name: DelayDistribution.from_df(
+            df=pd.read_csv(path, float_precision="round_trip")
+        )
         for delay_name, path in inputs["delay_distributions_results_paths"].items()
     }
     outputs = run_pipeline(

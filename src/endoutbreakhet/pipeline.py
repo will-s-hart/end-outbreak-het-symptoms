@@ -14,6 +14,7 @@ from tqdm import tqdm
 from endoutbreakhet.evidence import compute_log_evidence
 from endoutbreakhet.inference import fit_model
 from endoutbreakhet.risk import compute_risk
+from endoutbreakhet.utils import validate_delay_distributions
 
 
 def run_pipeline(
@@ -36,6 +37,9 @@ def run_pipeline(
     # computes every risk the model has after that day (DLO risks of sustained transmission
     # and reports aren't implemented). The trace and log evidence are kept for
     # comparison_day only, where specs are compared
+    validate_delay_distributions(
+        model_name=model_name, delay_distributions=delay_distributions
+    )
     days = np.union1d(risk_days, [comparison_day])
     reported_incidence_vec = np.pad(
         reported_incidence_vec, (0, max(0, days[-1] + 1 - len(reported_incidence_vec)))

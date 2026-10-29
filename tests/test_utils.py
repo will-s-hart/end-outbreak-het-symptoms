@@ -1,9 +1,11 @@
 # Note that AI tools were used to generate tests
 import numpy as np
+import pandas as pd
 import pytest
 import scipy.stats
 
 from endoutbreakhet.utils import (
+    DelayDistribution,
     delay_matrix,
     discretise_cori,
     gamma_dist_from_mean_sd,
@@ -13,11 +15,41 @@ from endoutbreakhet.utils import (
 )
 
 
-@pytest.mark.parametrize("first_lag", [0, 1])
-@pytest.mark.parametrize("n_days", [7, 3])  # n_days=3 truncates the delay vector
+def test_delay_distribution_lags_and_df_round_trip():
+    delay = DelayDistribution(prob=np.array([0.3, 0.7]), first_lag=2)
+    np.testing.assert_array_equal(delay.lags, [2, 3])
+    assert delay.max_lag == 3
+    df = delay.to_df()
+    assert df["lag"].tolist() == [2, 3]
+    round_trip_delay = DelayDistribution.from_df(df=df)
+    assert round_trip_delay.first_lag == 2
+    np.testing.assert_array_equal(round_trip_delay.prob, delay.prob)
+
+
+@pytest.mark.parametrize("prob", [[], [[1.0]], [np.nan, 1.0], [-0.1, 1.1], [0.2, 0.3]])
+def test_delay_distribution_rejects_invalid_prob(*, prob):
+    with pytest.raises(ValueError, match="prob"):
+        DelayDistribution(prob=np.array(prob), first_lag=1)
+
+
+def test_delay_distribution_rejects_negative_first_lag():
+    with pytest.raises(ValueError, match="first_lag"):
+        DelayDistribution(prob=np.array([1.0]), first_lag=-1)
+
+
+@pytest.mark.parametrize("lags", [[0, 2], [1, 1], [2, 1]])
+def test_delay_distribution_from_df_rejects_non_consecutive_lags(*, lags):
+    with pytest.raises(ValueError, match="consecutive"):
+        DelayDistribution.from_df(df=pd.DataFrame({"lag": lags, "prob": [0.3, 0.7]}))
+
+
+@pytest.mark.parametrize("first_lag", [0, 1, 5])
+@pytest.mark.parametrize("n_days", [0, 1, 3, 7])
 def test_delay_matrix(*, first_lag, n_days):
     dist_vec = np.array([0.1, 0.2, 0.3, 0.4])
-    matrix = delay_matrix(dist_vec=dist_vec, n_days=n_days, first_lag=first_lag)
+    matrix = delay_matrix(
+        delay=DelayDistribution(prob=dist_vec, first_lag=first_lag), n_days=n_days
+    )
     assert matrix.shape == (n_days, n_days)
     for t in range(n_days):
         for s in range(n_days):

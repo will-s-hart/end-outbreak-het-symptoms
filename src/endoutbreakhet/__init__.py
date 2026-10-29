@@ -3,12 +3,16 @@ from endoutbreakhet.inference import fit_model
 from endoutbreakhet.pipeline import run_pipeline
 from endoutbreakhet.risk import compute_risk
 from endoutbreakhet.utils import (
+    DELAY_FIRST_LAGS,
+    DelayDistribution,
     discretise_cori,
     gamma_dist_from_mean_sd,
     lognormal_params_from_median_quantile_025,
 )
 
 __all__ = [
+    "DELAY_FIRST_LAGS",
+    "DelayDistribution",
     "compute_log_evidence",
     "compute_model_probabilities",
     "compute_risk",

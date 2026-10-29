@@ -1,11 +1,56 @@
 import functools
+from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
+import pandas as pd
 import scipy.integrate
 import scipy.linalg
 import scipy.stats
 from numpy.typing import NDArray
+
+# First lag of each delay, which the models assume. A serial interval, or TOST plus
+# incubation period, of at least a day stops a day's cases causing themselves
+DELAY_FIRST_LAGS = {"serial_interval": 1, "inc_period": 1, "tost": 0}
+
+
+# Identity equality, since arrays don't compare as booleans
+@dataclass(frozen=True, kw_only=True, eq=False)
+class DelayDistribution:
+    """Probability mass function of a delay, with prob[i] the probability of lag
+    first_lag + i."""
+
+    prob: NDArray[np.float64]
+    first_lag: int
+
+    def __post_init__(self):
+        if self.first_lag < 0:
+            raise ValueError(f"first_lag must be non-negative: {self.first_lag}")
+        if (
+            self.prob.ndim != 1
+            or np.any(self.prob < 0)
+            or not np.isclose(np.sum(self.prob), 1)
+        ):
+            raise ValueError("prob must be a vector of probabilities summing to 1")
+
+    @property
+    def lags(self):
+        return np.arange(self.first_lag, self.max_lag + 1)
+
+    @property
+    def max_lag(self):
+        return self.first_lag + len(self.prob) - 1
+
+    @classmethod
+    def from_df(cls, *, df):
+        # From a table of consecutive lags and their probabilities, as made by to_df
+        lags = df["lag"].to_numpy()
+        if not np.array_equal(lags, lags[0] + np.arange(len(lags))):
+            raise ValueError("lags must be consecutive")
+        return cls(prob=df["prob"].to_numpy(), first_lag=int(lags[0]))
+
+    def to_df(self):
+        return pd.DataFrame({"lag": self.lags, "prob": self.prob})
 
 
 class _ContinuousDist(Protocol):
@@ -86,14 +131,28 @@ def parse_lognormal_prior(*, name, priors):
     )
 
 
-def delay_matrix(*, dist_vec, n_days, first_lag):
-    # Lower-triangular matrix with [t, s] entry dist_vec[t - s - first_lag], so that
-    # (matrix @ x)[t] is the convolution of x with a delay whose pmf at lag first_lag + i
-    # is dist_vec[i]
-    dist_vec = dist_vec[: n_days - first_lag]
+def delay_matrix(*, delay, n_days):
+    # Lower-triangular matrix with [t, s] entry delay.prob[t - s - delay.first_lag],
+    # so that (matrix @ x)[t] is the convolution of x with the delay
     first_col = np.zeros(n_days)
-    first_col[first_lag : first_lag + len(dist_vec)] = dist_vec
+    if delay.first_lag < n_days:
+        prob = delay.prob[: n_days - delay.first_lag]
+        first_col[delay.first_lag : delay.first_lag + len(prob)] = prob
     return scipy.linalg.toeplitz(first_col, np.zeros(n_days))
+
+
+def validate_delay_distributions(*, model_name, delay_distributions):
+    # Checks the delays the model uses start at the lags it assumes
+    delay_names = (
+        ("tost", "inc_period") if model_name.endswith("_so") else ("serial_interval",)
+    )
+    for delay_name in delay_names:
+        first_lag = delay_distributions[delay_name].first_lag
+        if first_lag != DELAY_FIRST_LAGS[delay_name]:
+            raise ValueError(
+                f"{delay_name} must start at lag {DELAY_FIRST_LAGS[delay_name]}, got "
+                f"{first_lag}"
+            )
 
 
 def get_likelihood_idx(*, reported_incidence_vec, force_vec):

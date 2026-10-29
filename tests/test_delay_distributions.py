@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from endoutbreakhet import discretise_cori, gamma_dist_from_mean_sd
+from endoutbreakhet import DELAY_FIRST_LAGS, discretise_cori, gamma_dist_from_mean_sd
 from scripts import delay_distributions
 from scripts.inputs import get_inputs_delay_distributions
 
@@ -38,7 +38,7 @@ def test_run_analyses_writes_discretised_delays(*, tmp_path, monkeypatch):
                     mean=cont_params["mean"], sd=cont_params["sd"]
                 ),
                 max_val=cont_params["max"],
-                allow_zero=cont_params["allow_zero"],
+                allow_zero=DELAY_FIRST_LAGS[delay_name] == 0,
             ),
         )
     assert first_lag_by_delay == {"serial_interval": 1, "inc_period": 1, "tost": 0}

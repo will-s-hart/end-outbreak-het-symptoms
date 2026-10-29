@@ -9,7 +9,7 @@ import scipy.special
 import scipy.stats
 import xarray as xr
 
-from endoutbreakhet import evidence
+from endoutbreakhet import DelayDistribution, evidence
 from endoutbreakhet.inference import _build_pymc_model, fit_model
 from endoutbreakhet.utils import parse_lognormal_prior
 
@@ -423,7 +423,9 @@ def test_bridge_sampling_matches_analytical_under_reporting(
         model_name="poisson",
         reported_incidence_vec=reported_incidence_vec,
         switch_day=2,
-        delay_distributions={"serial_interval": np.array([1.0])},
+        delay_distributions={
+            "serial_interval": DelayDistribution(prob=np.array([1.0]), first_lag=1)
+        },
         priors={
             "rep_no_before": {"dist": "fixed", "value": rep_no_before},
             "rep_no_after": {"dist": "fixed", "value": rep_no_after},
@@ -456,7 +458,11 @@ def test_bridge_sampling_constant_counts():
         model_name="poisson",
         reported_incidence_vec=np.array([2, 0, 0]),
         switch_day=2,
-        delay_distributions={"serial_interval": np.array([0.0, 0.0, 1.0])},
+        delay_distributions={
+            "serial_interval": DelayDistribution(
+                prob=np.array([0.0, 0.0, 1.0]), first_lag=1
+            )
+        },
         priors={
             "rep_no_before": {"dist": "fixed", "value": 0.8},
             "rep_no_after": {"dist": "fixed", "value": 0.4},
@@ -481,7 +487,7 @@ def test_bridge_sampling_matches_quadrature(*, model_name, toy_inputs_fixed_disp
     n_days = len(reported_incidence_vec)
     total_inf_vec = np.convolve(
         reported_incidence_vec,
-        np.concatenate([[0.0], inputs["delay_distributions"]["serial_interval"]]),
+        np.concatenate([[0.0], inputs["delay_distributions"]["serial_interval"].prob]),
     )[:n_days]
     days = np.arange(n_days)
     rng = np.random.default_rng(0)
@@ -626,7 +632,7 @@ def test_bridge_sampling_matches_forward_simulation(*, model_name, step, toy_inp
 
     reported_incidence_vec = inputs["reported_incidence_vec"]
     n_days = len(reported_incidence_vec)
-    serial_interval = inputs["delay_distributions"]["serial_interval"]
+    serial_interval = inputs["delay_distributions"]["serial_interval"].prob
     n_samples = 1_000_000
     param_samples = {}
     for name in _PARAM_NAMES:

@@ -185,16 +185,14 @@ def plot_risk_incidence_overlay(
 
 
 def plot_delay_distribution(
-    *, delay_df, delay_name, max_lag, label=None, overlay_df=None, overlay_label=None
+    *, delay, delay_name, max_lag, label=None, overlay=None, overlay_label=None
 ):
-    # Probability mass by lag as bars, optionally with another distribution's as a line
+    # Probability mass by lag as bars, optionally with another delay's as a line
     fig, ax = plt.subplots()
-    bars = ax.bar(
-        delay_df["lag"], delay_df["prob"], width=1, color="darkgray", label=label
-    )
-    if overlay_df is not None:
+    bars = ax.bar(delay.lags, delay.prob, width=1, color="darkgray", label=label)
+    if overlay is not None:
         (line,) = ax.plot(
-            overlay_df["lag"], overlay_df["prob"], color="tab:red", label=overlay_label
+            overlay.lags, overlay.prob, color="tab:red", label=overlay_label
         )
         # Bars first, which matplotlib would otherwise list after lines
         ax.legend(handles=[bars, line])
