@@ -22,50 +22,33 @@ MODEL_SPECS: dict[str, dict[str, Any]] = {
     "poisson": {
         "model_name": "poisson",
         "priors": PRIORS_POISSON,
-    },
-    "dlo_fixed_dispersion": {
-        "model_name": "dlo",
-        "priors": PRIORS_FIXED_DISPERSION,
-    },
-    "dlo_estimated_dispersion": {
-        "model_name": "dlo",
-        "priors": PRIORS_ESTIMATED_DISPERSION,
-    },
-    "sse_fixed_dispersion": {
-        "model_name": "sse",
-        "priors": PRIORS_FIXED_DISPERSION,
-    },
-    "sse_estimated_dispersion": {
-        "model_name": "sse",
-        "priors": PRIORS_ESTIMATED_DISPERSION,
-    },
-    "ssi_fixed_dispersion": {
-        "model_name": "ssi",
-        "priors": PRIORS_FIXED_DISPERSION,
-    },
-    "ssi_estimated_dispersion": {
-        "model_name": "ssi",
-        "priors": PRIORS_ESTIMATED_DISPERSION,
+        "reporting_prob": 1.0,
     },
     "poisson_so": {
         "model_name": "poisson_so",
         "priors": PRIORS_POISSON,
+        "reporting_prob": 1.0,
     },
-    "sse_so_fixed_dispersion": {
-        "model_name": "sse_so",
-        "priors": PRIORS_FIXED_DISPERSION,
+    **{
+        f"{model_name}_{dispersion_type}_dispersion": {
+            "model_name": model_name,
+            "priors": priors,
+            "reporting_prob": 1.0,
+        }
+        for model_name in ("dlo", "sse", "ssi", "sse_so", "ssi_so")
+        for dispersion_type, priors in (
+            ("fixed", PRIORS_FIXED_DISPERSION),
+            ("estimated", PRIORS_ESTIMATED_DISPERSION),
+        )
     },
-    "sse_so_estimated_dispersion": {
-        "model_name": "sse_so",
-        "priors": PRIORS_ESTIMATED_DISPERSION,
-    },
-    "ssi_so_fixed_dispersion": {
-        "model_name": "ssi_so",
-        "priors": PRIORS_FIXED_DISPERSION,
-    },
-    "ssi_so_estimated_dispersion": {
-        "model_name": "ssi_so",
-        "priors": PRIORS_ESTIMATED_DISPERSION,
+    **{
+        f"{model_name}_{round(100 * reporting_prob)}_pc_reporting": {
+            "model_name": model_name,
+            "priors": PRIORS_FIXED_DISPERSION,
+            "reporting_prob": reporting_prob,
+        }
+        for model_name in ("sse", "ssi", "sse_so", "ssi_so")
+        for reporting_prob in (0.6, 0.8)
     },
 }
 FIT_KWARGS = {
@@ -79,14 +62,14 @@ N_EVIDENCE_PROPOSAL_SAMPLES = 10_000
 FIG_EXTENSIONS = ("svg", "png")
 DATA_PATH = pathlib.Path("data/equateur_2018_onsets.csv")
 
-COMPARISON_SPECS = {
+COMPARISON_SPECS: dict[str, dict[str, Any]] = {
     "naive_models_fixed_dispersion": {
         "model_spec_names": [
             "dlo_fixed_dispersion",
             "sse_fixed_dispersion",
             "ssi_fixed_dispersion",
         ],
-        "risk_types": ("cases",),
+        "risk_panels": (("cases",),),
         "param_names": ("rep_no_before", "rep_no_after"),
     },
     "naive_models_estimated_dispersion": {
@@ -95,7 +78,7 @@ COMPARISON_SPECS = {
             "sse_estimated_dispersion",
             "ssi_estimated_dispersion",
         ],
-        "risk_types": ("cases",),
+        "risk_panels": (("cases",),),
         "param_names": ("rep_no_before", "rep_no_after", "dispersion"),
     },
     "naive_vs_so_fixed_dispersion": {
@@ -105,7 +88,7 @@ COMPARISON_SPECS = {
             "sse_so_fixed_dispersion",
             "ssi_so_fixed_dispersion",
         ],
-        "risk_types": ("cases", "transmission"),
+        "risk_panels": (("cases", "transmission"), ("sustained",)),
         "param_names": ("rep_no_before", "rep_no_after"),
     },
     "naive_vs_so_estimated_dispersion": {
@@ -115,7 +98,7 @@ COMPARISON_SPECS = {
             "sse_so_estimated_dispersion",
             "ssi_so_estimated_dispersion",
         ],
-        "risk_types": ("cases", "transmission"),
+        "risk_panels": (("cases", "transmission"),),
         "param_names": ("rep_no_before", "rep_no_after", "dispersion"),
     },
     "poisson_vs_superspreading": {
@@ -125,7 +108,27 @@ COMPARISON_SPECS = {
             "ssi_fixed_dispersion",
             "ssi_so_fixed_dispersion",
         ],
-        "risk_types": ("cases", "transmission"),
+        "risk_panels": (("cases", "transmission"),),
+        "param_names": ("rep_no_before", "rep_no_after"),
+    },
+    "naive_vs_so_60_pc_reporting": {
+        "model_spec_names": [
+            "sse_60_pc_reporting",
+            "ssi_60_pc_reporting",
+            "sse_so_60_pc_reporting",
+            "ssi_so_60_pc_reporting",
+        ],
+        "risk_panels": (("cases", "transmission"),),
+        "param_names": ("rep_no_before", "rep_no_after"),
+    },
+    "naive_vs_so_80_pc_reporting": {
+        "model_spec_names": [
+            "sse_80_pc_reporting",
+            "ssi_80_pc_reporting",
+            "sse_so_80_pc_reporting",
+            "ssi_so_80_pc_reporting",
+        ],
+        "risk_panels": (("cases", "transmission"), ("reports",)),
         "param_names": ("rep_no_before", "rep_no_after"),
     },
 }
@@ -137,6 +140,7 @@ def get_inputs_model_fits(*, model_spec_name):
         **_get_shared_inputs(),
         "model_name": model_spec["model_name"],
         "priors": model_spec["priors"],
+        "reporting_prob": model_spec["reporting_prob"],
         "fit_kwargs": FIT_KWARGS,
         "n_evidence_proposal_samples": N_EVIDENCE_PROPOSAL_SAMPLES,
         "rng": np.random.default_rng(seed=42),
@@ -178,7 +182,7 @@ def get_inputs_model_comparison_plots(*, comparison_spec_name):
         "results_paths_by_model": results_paths_by_model,
         "priors": priors,
         "param_names": comparison_spec["param_names"],
-        "risk_types": comparison_spec["risk_types"],
+        "risk_panels": comparison_spec["risk_panels"],
         "fig_paths": get_fig_paths_model_comparison_plots(
             comparison_spec_name=comparison_spec_name
         ),
@@ -198,13 +202,14 @@ def get_results_paths_model_fits(*, model_spec_name):
 def get_fig_paths_model_comparison_plots(*, comparison_spec_name):
     # One path per file format for each figure
     fig_dir = pathlib.Path("figures/model_comparison") / comparison_spec_name
+    comparison_spec = COMPARISON_SPECS[comparison_spec_name]
     fig_names = [
-        *(
-            f"densities_{param_name}"
-            for param_name in COMPARISON_SPECS[comparison_spec_name]["param_names"]
-        ),
+        *(f"densities_{param_name}" for param_name in comparison_spec["param_names"]),
         "model_probabilities",
-        "risk_incidence_overlay",
+        *(
+            f"risk_incidence_overlay_{'_'.join(risk_types)}"
+            for risk_types in comparison_spec["risk_panels"]
+        ),
     ]
     return {
         fig_name: [fig_dir / f"{fig_name}.{ext}" for ext in FIG_EXTENSIONS]

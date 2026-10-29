@@ -45,21 +45,23 @@ def make_plots(*, comparison_spec_name):
         )
     )
     save_figure(fig=model_probabilities_fig, paths=fig_paths["model_probabilities"])
-    # Overlay of risk and incidence curves
+    # Overlay of risk and incidence curves, one figure per panel of risk types
     risk_df_by_model = {
         model_name: pd.read_csv(paths["risk"])
         for model_name, paths in results_paths_by_model.items()
     }
-    risk_incidence_overlay_fig = plot_risk_incidence_overlay(
-        risk_df_by_model=risk_df_by_model,
-        reported_incidence_vec=inputs["reported_incidence_vec"],
-        first_case_date=inputs["first_case_date"],
-        risk_types=inputs["risk_types"],
-        vline_days=[inputs["ert_days"]["arrival"], inputs["ert_days"]["departure"]],
-    )
-    save_figure(
-        fig=risk_incidence_overlay_fig, paths=fig_paths["risk_incidence_overlay"]
-    )
+    for risk_types in inputs["risk_panels"]:
+        risk_incidence_overlay_fig = plot_risk_incidence_overlay(
+            risk_df_by_model=risk_df_by_model,
+            reported_incidence_vec=inputs["reported_incidence_vec"],
+            first_case_date=inputs["first_case_date"],
+            risk_types=risk_types,
+            vline_days=[inputs["ert_days"]["arrival"], inputs["ert_days"]["departure"]],
+        )
+        save_figure(
+            fig=risk_incidence_overlay_fig,
+            paths=fig_paths[f"risk_incidence_overlay_{'_'.join(risk_types)}"],
+        )
 
 
 if __name__ == "__main__":

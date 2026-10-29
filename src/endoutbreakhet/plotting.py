@@ -21,7 +21,19 @@ _MODEL_STYLES = {
     "poisson_so": {"label": "Poisson-SO", "color": "tab:gray"},
 }
 
-_RISK_TYPE_LINESTYLES = {"cases": "-", "transmission": "--"}
+_RISK_TYPE_LINESTYLES = {
+    "cases": "-",
+    "transmission": "--",
+    "sustained": ":",
+    "reports": "-.",
+}
+
+_RISK_TYPE_YLABELS = {
+    "cases": "Risk of additional cases",
+    "transmission": "Risk of additional transmission",
+    "sustained": "Risk of sustained transmission",
+    "reports": "Risk of additional reported cases",
+}
 
 
 def plot_densities(
@@ -118,7 +130,11 @@ def plot_risk_incidence_overlay(
     for model_name, risk_df in risk_df_by_model.items():
         model_style = _MODEL_STYLES[model_name]
         # Risks of cases and transmission coincide in the naive models, so they get one curve
-        model_risk_types = risk_types if model_name.endswith("_so") else ("cases",)
+        model_risk_types = (
+            tuple(risk_type for risk_type in risk_types if risk_type != "transmission")
+            if not model_name.endswith("_so") and "cases" in risk_types
+            else risk_types
+        )
         for risk_type in model_risk_types:
             label = model_style["label"]
             if len(model_risk_types) > 1:
@@ -140,9 +156,7 @@ def plot_risk_incidence_overlay(
         plot_days=next(iter(risk_df_by_model.values()))["day"].to_numpy(),
         interval_months=1,
     )
-    ax.set_ylabel(
-        f"Risk of additional {risk_types[0]}" if len(risk_types) == 1 else "Risk"
-    )
+    ax.set_ylabel(_RISK_TYPE_YLABELS[risk_types[0]] if len(risk_types) == 1 else "Risk")
     twin_ax = ax.twinx()
     twin_ax.bar(
         x=np.arange(len(reported_incidence_vec)),

@@ -15,15 +15,17 @@ from scripts.inputs import (
 
 
 @pytest.mark.parametrize("model_spec_name", MODEL_SPECS)
-def test_model_specs_build(*, model_spec_name, toy_inputs):
-    model_spec = MODEL_SPECS[model_spec_name]
+def test_model_specs_build(*, model_spec_name, toy_inputs, monkeypatch):
+    # The spec's model on toy data, so skip loading the real data
+    monkeypatch.setattr(scripts.inputs, "_get_shared_inputs", dict)
+    inputs = get_inputs_model_fits(model_spec_name=model_spec_name)
     _build_pymc_model(
-        model_name=model_spec["model_name"],
+        model_name=inputs["model_name"],
         reported_incidence_vec=toy_inputs["reported_incidence_vec"],
         switch_day=toy_inputs["switch_day"],
         delay_distributions=toy_inputs["delay_distributions"],
-        priors=model_spec["priors"],
-        reporting_prob=1.0,
+        priors=inputs["priors"],
+        reporting_prob=inputs["reporting_prob"],
     )
 
 
@@ -36,8 +38,18 @@ def test_comparison_specs_valid(*, comparison_spec_name):
         for model_spec_name in comparison_spec["model_spec_names"]
     ]
     assert len(set(model_names)) == len(model_names)
-    assert isinstance(comparison_spec["risk_types"], tuple)
-    assert set(comparison_spec["risk_types"]) <= {"cases", "transmission"}
+    # A tuple of non-empty tuples (a missing trailing comma would leave a bare string), of
+    # risk types every model in the comparison records
+    risk_panels = comparison_spec["risk_panels"]
+    assert isinstance(risk_panels, tuple) and risk_panels
+    recorded_risk_types = (
+        {"cases", "transmission"}
+        if "dlo" in model_names
+        else {"cases", "transmission", "sustained", "reports"}
+    )
+    for risk_types in risk_panels:
+        assert isinstance(risk_types, tuple) and risk_types
+        assert set(risk_types) <= recorded_risk_types
     assert isinstance(comparison_spec["param_names"], tuple)
 
 
@@ -63,7 +75,10 @@ def test_get_inputs_model_comparison_plots(*, comparison_spec_name, monkeypatch)
     assert set(fig_paths) == {
         *(f"densities_{param_name}" for param_name in comparison_spec["param_names"]),
         "model_probabilities",
-        "risk_incidence_overlay",
+        *(
+            f"risk_incidence_overlay_{'_'.join(risk_types)}"
+            for risk_types in comparison_spec["risk_panels"]
+        ),
     }
     for fig_name, paths in fig_paths.items():
         assert [path.suffix for path in paths] == [f".{ext}" for ext in FIG_EXTENSIONS]
@@ -82,7 +97,7 @@ def test_get_inputs_model_comparison_plots_raises_for_conflicting_priors(
         "conflicting_priors",
         {
             "model_spec_names": ["sse_fixed_dispersion", "ssi_estimated_dispersion"],
-            "risk_types": ("cases",),
+            "risk_panels": (("cases",),),
             "param_names": ("rep_no_before", "dispersion"),
         },
     )

@@ -54,6 +54,8 @@ def risk_df_by_model():
                 "day": days,
                 "risk_cases": risk_cases_vec,
                 "risk_transmission": risk_cases_vec,
+                "risk_sustained": np.linspace(0.5, 0.0, len(days)),
+                "risk_reports": np.linspace(0.85, 0.05, len(days)),
             }
         ),
         "sse_so": pd.DataFrame(
@@ -61,6 +63,8 @@ def risk_df_by_model():
                 "day": days,
                 "risk_cases": np.linspace(0.95, 0.2, len(days)),
                 "risk_transmission": np.linspace(0.8, 0.05, len(days)),
+                "risk_sustained": np.linspace(0.6, 0.0, len(days)),
+                "risk_reports": np.linspace(0.9, 0.1, len(days)),
             }
         ),
     }
@@ -155,6 +159,29 @@ def test_plot_model_probabilities():
             ],
             "Risk",
         ),
+        # Naive models' risks of sustained transmission and reports differ from that of
+        # cases, so get their own curves
+        (
+            ("sustained",),
+            [("sse", "sustained", "SSE"), ("sse_so", "sustained", "SSE-SO")],
+            "Risk of sustained transmission",
+        ),
+        (
+            ("cases", "reports"),
+            [
+                ("sse", "cases", "SSE (cases)"),
+                ("sse", "reports", "SSE (reports)"),
+                ("sse_so", "cases", "SSE-SO (cases)"),
+                ("sse_so", "reports", "SSE-SO (reports)"),
+            ],
+            "Risk",
+        ),
+        # Without the risk of cases alongside, naive models show that of transmission
+        (
+            ("transmission",),
+            [("sse", "transmission", "SSE"), ("sse_so", "transmission", "SSE-SO")],
+            "Risk of additional transmission",
+        ),
     ],
 )
 def test_plot_risk_incidence_overlay(
@@ -180,7 +207,12 @@ def test_plot_risk_incidence_overlay(
         risk_df = risk_df_by_model[model_name]
         np.testing.assert_array_equal(line.get_xdata(), risk_df["day"])
         np.testing.assert_array_equal(line.get_ydata(), risk_df[f"risk_{risk_type}"])
-        assert line.get_linestyle() == {"cases": "-", "transmission": "--"}[risk_type]
+        assert (
+            line.get_linestyle()
+            == {"cases": "-", "transmission": "--", "sustained": ":", "reports": "-."}[
+                risk_type
+            ]
+        )
         assert line.get_label() == label
     assert [text.get_text() for text in ax.get_legend().get_texts()] == [
         label for _, _, label in expected_lines

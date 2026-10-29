@@ -28,15 +28,22 @@ def run_pipeline(
     fit_kwargs,
     n_evidence_proposal_samples,
     rng,
+    reporting_prob=1.0,
     n_jobs=-1,
 ):
     # Fits the model to the onsets up to and including each day in risk_days and
     # comparison_day (taking onsets after the end of reported_incidence_vec to be zero), and
-    # computes the risks of cases and transmission after that day. The trace and log
-    # evidence are kept for comparison_day only, where specs are compared
+    # computes every risk the model has after that day (DLO risks of sustained transmission
+    # and reports aren't implemented). The trace and log evidence are kept for
+    # comparison_day only, where specs are compared
     days = np.union1d(risk_days, [comparison_day])
     reported_incidence_vec = np.pad(
         reported_incidence_vec, (0, max(0, days[-1] + 1 - len(reported_incidence_vec)))
+    )
+    risk_types = (
+        ("cases", "transmission")
+        if model_name == "dlo"
+        else ("cases", "transmission", "sustained", "reports")
     )
     analyse_day = functools.partial(
         _analyse_day,
@@ -44,6 +51,8 @@ def run_pipeline(
         switch_day=switch_day,
         delay_distributions=delay_distributions,
         priors=priors,
+        reporting_prob=reporting_prob,
+        risk_types=risk_types,
         # Chains run sequentially within each fit, as the fits run in parallel
         fit_kwargs=fit_kwargs | {"cores": 1, "progressbar": False},
         n_evidence_proposal_samples=n_evidence_proposal_samples,
@@ -66,10 +75,12 @@ def run_pipeline(
     risk_df = pd.DataFrame(
         {
             "day": days,
-            "risk_cases": [output["risk_cases"] for output in day_outputs],
-            "risk_transmission": [
-                output["risk_transmission"] for output in day_outputs
-            ],
+            **{
+                f"risk_{risk_type}": [
+                    output[f"risk_{risk_type}"] for output in day_outputs
+                ]
+                for risk_type in risk_types
+            },
         }
     )
     return {
@@ -86,6 +97,8 @@ def _analyse_day(
     switch_day,
     delay_distributions,
     priors,
+    reporting_prob,
+    risk_types,
     fit_kwargs,
     n_evidence_proposal_samples,
     rng,
@@ -98,6 +111,7 @@ def _analyse_day(
         delay_distributions=delay_distributions,
         priors=priors,
         rng=rng,
+        reporting_prob=reporting_prob,
         **fit_kwargs,
     )
     output = {
@@ -107,9 +121,10 @@ def _analyse_day(
             switch_day=switch_day,
             delay_distributions=delay_distributions,
             trace=trace,
+            reporting_prob=reporting_prob,
             risk_type=risk_type,
         )
-        for risk_type in ("cases", "transmission")
+        for risk_type in risk_types
     }
     if not keep_trace_and_evidence:
         return output | {"trace": None, "evidence": None}
@@ -123,6 +138,7 @@ def _analyse_day(
         trace=trace,
         n_proposal_samples=n_evidence_proposal_samples,
         rng=rng,
+        reporting_prob=reporting_prob,
     )
     return output | {"trace": trace, "evidence": evidence}
 

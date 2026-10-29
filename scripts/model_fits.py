@@ -19,6 +19,7 @@ def run_analyses(*, model_spec_name):
         fit_kwargs=inputs["fit_kwargs"],
         n_evidence_proposal_samples=inputs["n_evidence_proposal_samples"],
         rng=inputs["rng"],
+        reporting_prob=inputs["reporting_prob"],
     )
 
     results_paths = inputs["results_paths"]

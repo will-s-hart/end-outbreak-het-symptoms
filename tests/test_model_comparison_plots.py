@@ -42,8 +42,10 @@ def test_make_plots_writes_figures(*, comparison_spec_name, tmp_path, monkeypatc
         pd.DataFrame(
             {
                 "day": risk_days,
-                "risk_cases": rng.uniform(size=len(risk_days)),
-                "risk_transmission": rng.uniform(size=len(risk_days)),
+                **{
+                    f"risk_{risk_type}": rng.uniform(size=len(risk_days))
+                    for risk_type in ("cases", "transmission", "sustained", "reports")
+                },
             }
         ).to_csv(paths["risk"], index=False)
     monkeypatch.setattr(
