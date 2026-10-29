@@ -4,8 +4,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from endoutbreakhet import discretise_cori, gamma_dist_from_mean_sd
-
 PRIORS_POISSON = {
     "rep_no_before": {"dist": "lognormal", "median": 1.0, "quantile_025": 0.2},
     "rep_no_after": {"dist": "lognormal", "median": 1.0, "quantile_025": 0.2},
@@ -134,10 +132,40 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
 }
 
 
+def get_inputs_delay_distributions():
+    serial_interval_cont_params = {
+        "mean": 15.3,
+        "sd": 9.3,
+        "max": 150,
+        "allow_zero": False,
+    }
+    inc_period_cont_params = {"mean": 11.4, "sd": 8.1, "max": 150, "allow_zero": False}
+    tost_cont_params = {
+        "mean": serial_interval_cont_params["mean"] - inc_period_cont_params["mean"],
+        "sd": (
+            serial_interval_cont_params["sd"] ** 2 - inc_period_cont_params["sd"] ** 2
+        )
+        ** 0.5,
+        "max": 150,
+        "allow_zero": True,
+    }
+    return {
+        "cont_params_by_delay": {
+            "serial_interval": serial_interval_cont_params,
+            "inc_period": inc_period_cont_params,
+            "tost": tost_cont_params,
+        },
+        "results_paths": get_results_paths_delay_distributions(),
+    }
+
+
 def get_inputs_model_fits(*, model_spec_name):
     model_spec = MODEL_SPECS[model_spec_name]
     return {
         **_get_shared_inputs(),
+        # Paths rather than the distributions themselves, so the fits depend on the
+        # delay_distributions results as files
+        "delay_distributions_results_paths": get_results_paths_delay_distributions(),
         "model_name": model_spec["model_name"],
         "priors": model_spec["priors"],
         "reporting_prob": model_spec["reporting_prob"],
@@ -189,6 +217,14 @@ def get_inputs_model_comparison_plots(*, comparison_spec_name):
     }
 
 
+def get_results_paths_delay_distributions():
+    results_dir = pathlib.Path("results/delay_distributions")
+    return {
+        delay_name: results_dir / f"{delay_name}.csv"
+        for delay_name in ("serial_interval", "inc_period", "tost")
+    }
+
+
 def get_results_paths_model_fits(*, model_spec_name):
     results_dir = pathlib.Path("results/model_fits") / model_spec_name
     return {
@@ -235,39 +271,6 @@ def _get_shared_inputs():
     comparison_day = ert_departure_day
     risk_days = np.arange(switch_day, ert_departure_day + 20)
 
-    serial_interval_cont_params = {"mean": 15.3, "sd": 9.3, "max": 150}
-    inc_period_cont_params = {"mean": 11.4, "sd": 8.1, "max": 150}
-    tost_cont_params = {
-        "mean": serial_interval_cont_params["mean"] - inc_period_cont_params["mean"],
-        "sd": (
-            serial_interval_cont_params["sd"] ** 2 - inc_period_cont_params["sd"] ** 2
-        )
-        ** 0.5,
-        "max": 150,
-    }
-    delay_distributions = {
-        "serial_interval": discretise_cori(
-            dist_cont=gamma_dist_from_mean_sd(
-                mean=serial_interval_cont_params["mean"],
-                sd=serial_interval_cont_params["sd"],
-            ),
-            max_val=serial_interval_cont_params["max"],
-        ),
-        "inc_period": discretise_cori(
-            dist_cont=gamma_dist_from_mean_sd(
-                mean=inc_period_cont_params["mean"], sd=inc_period_cont_params["sd"]
-            ),
-            max_val=inc_period_cont_params["max"],
-        ),
-        "tost": discretise_cori(
-            dist_cont=gamma_dist_from_mean_sd(
-                mean=tost_cont_params["mean"], sd=tost_cont_params["sd"]
-            ),
-            max_val=tost_cont_params["max"],
-            allow_zero=True,
-        ),
-    }
-
     return {
         "reported_incidence_vec": reported_incidence_vec,
         "first_case_date": first_case_date,
@@ -275,5 +278,4 @@ def _get_shared_inputs():
         "switch_day": switch_day,
         "comparison_day": comparison_day,
         "risk_days": risk_days,
-        "delay_distributions": delay_distributions,
     }

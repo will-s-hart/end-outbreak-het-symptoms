@@ -9,9 +9,12 @@ from scripts.inputs import (
     COMPARISON_SPECS,
     FIG_EXTENSIONS,
     MODEL_SPECS,
+    get_inputs_delay_distributions,
     get_inputs_model_comparison_plots,
     get_inputs_model_fits,
+    get_results_paths_delay_distributions,
 )
+from scripts.snakemake_utils import as_param
 
 
 @pytest.mark.parametrize("model_spec_name", MODEL_SPECS)
@@ -103,3 +106,50 @@ def test_get_inputs_model_comparison_plots_raises_for_conflicting_priors(
     )
     with pytest.raises(ValueError, match="different priors for dispersion"):
         get_inputs_model_comparison_plots(comparison_spec_name="conflicting_priors")
+
+
+def test_get_inputs_delay_distributions():
+    inputs = get_inputs_delay_distributions()
+    assert inputs["results_paths"] == get_results_paths_delay_distributions()
+    assert inputs["cont_params_by_delay"].keys() == inputs["results_paths"].keys()
+    as_param(inputs=inputs)
+
+
+def test_get_inputs_model_fits_reads_delay_distributions_results(*, monkeypatch):
+    monkeypatch.setattr(scripts.inputs, "_get_shared_inputs", dict)
+    inputs = get_inputs_model_fits(model_spec_name="sse_fixed_dispersion")
+    assert (
+        inputs["delay_distributions_results_paths"]
+        == get_results_paths_delay_distributions()
+    )
+
+
+def test_model_fits_params_distinct_per_spec_and_stable():
+    # Snakemake compares params by repr
+    params = _get_model_fits_params()
+    assert len(set(params.values())) == len(MODEL_SPECS)
+    assert _get_model_fits_params() == params
+
+
+def test_editing_a_model_spec_changes_only_its_params(*, monkeypatch):
+    params_before = _get_model_fits_params()
+    monkeypatch.setitem(
+        MODEL_SPECS,
+        "sse_60_pc_reporting",
+        MODEL_SPECS["sse_60_pc_reporting"] | {"reporting_prob": 0.61},
+    )
+    params_after = _get_model_fits_params()
+    assert {
+        model_spec_name
+        for model_spec_name in MODEL_SPECS
+        if params_after[model_spec_name] != params_before[model_spec_name]
+    } == {"sse_60_pc_reporting"}
+
+
+def _get_model_fits_params():
+    return {
+        model_spec_name: repr(
+            as_param(inputs=get_inputs_model_fits(model_spec_name=model_spec_name))
+        )
+        for model_spec_name in MODEL_SPECS
+    }

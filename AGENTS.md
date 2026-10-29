@@ -10,7 +10,8 @@ superspreading and symptom-linked infectiousness. A library package drives a Sna
 that produces the numerical results and figures.
 
 **Status:** the library (model fitting, risk, evidence, the rolling-fit pipeline and
-plotting), the `model_fits` analysis script and the `model_comparison_plots` plot script exist,
+plotting), the `delay_distributions` and `model_fits` analysis scripts (the first discretises
+the delay distributions the fits read) and the `model_comparison_plots` plot script exist,
 each with Snakemake rules. Model fitting, risk, evidence and the pipeline support
 under-reporting with a known reporting probability (`reporting_prob`, set per model spec, with
 60% and 80% reporting specs alongside the complete-reporting ones). Risk covers additional
@@ -27,8 +28,9 @@ land: describe what exists, not what is planned.
   `_helpers` sit below them in depth-first order of first use, with a family of per-model
   functions kept together and followed by the helpers it shares. Keep imports between
   modules one-way, with no cycles.
-- `scripts/` — analysis and plot scripts plus shared `inputs.py` (see below). A package at the
-  repo root, **not** under `src/`.
+- `scripts/` — analysis and plot scripts plus shared `inputs.py` (see below) and
+  `snakemake_utils.py` (`as_param`, for the Snakefile). A package at the repo root, **not**
+  under `src/`.
 - `tests/` — top-level pytest suite (not nested under the package).
 - `Snakefile` — orchestrates the full results-and-figures pipeline.
 - `data/` — inputs. `results/`, `figures/` — generated outputs, committed, except full MCMC
@@ -75,9 +77,24 @@ commands** — wire them in as rules.
 - Fit rules take `threads: lambda wildcards: workflow.cores`, since the pipeline parallelises
   over all cores itself (`n_jobs=-1`). It's a callable because `workflow.cores` raises when
   `--cores` is unset, as under a cluster executor, where `--set-threads` gives the width.
-- Every rule lists `shared_input_paths` (all package modules, globbed, and `scripts/inputs.py`)
-  plus its own script, data files and upstream results as inputs, so a change to shared code
-  triggers a rebuild.
+- Inputs are chosen so a rule reruns when, and only when, something it consumes changes:
+  - **Analysis rules** list `analysis_package_paths` (the package modules, globbed, minus
+    `plotting.py`, which analysis scripts never import; `tests/test_imports.py` checks), their
+    script, data files and upstream results. In place of `scripts/inputs.py` they take
+    `params: inputs=as_param(inputs=get_inputs_<name>(...))` (in a `lambda wildcards:` when
+    the call needs a wildcard). `as_param` converts the inputs to builtins, which Snakemake
+    records by `repr`, so editing `inputs.py` reruns only the analyses whose values change. It
+    raises `TypeError` on a type it can't convert: extend it rather than leave a value
+    untracked.
+  - **Plot rules** list `shared_input_paths` (all package modules and `scripts/inputs.py`),
+    their script, data files and the results they read. They're cheap, so they rerun on any
+    edit.
+- Snakemake always compares mtimes (leaving `mtime` out of `--rerun-triggers` changes
+  nothing), but an input newer than an output still counts as unchanged if its checksum
+  matches the one recorded in the output's metadata (inputs under 1 MB). So a touch or a
+  checkout reruns nothing; a content change does.
+- Rules with seconds of compute, such as `delay_distributions`, go in `localrules`, so on a
+  cluster they don't queue for a slot.
 - Add each analysis's output paths to the `results_paths` / `figure_paths` aggregates, which
   are built before `rule all` (Snakemake resolves a rule's inputs when it is defined).
 
@@ -94,6 +111,10 @@ from several analyses or several runs of one (e.g. overlapping sets of model spe
   prepared arrays/parameters. Those paths come from public `get_results_paths_<name>(...)` /
   `get_fig_paths_<name>(...)` getters, which the Snakefile also imports, as it does data paths
   (e.g. `DATA_PATH`). Never duplicate path construction.
+- Upstream results reach a script as paths in its inputs (e.g.
+  `delay_distributions_results_paths`), which the script reads, never as values loaded in
+  `inputs.py`: params are evaluated when the DAG is built, before upstream jobs run, so a
+  loaded value would be stale or missing.
 - Outputs follow `results/<name>/[<value>/]<output>.csv` and
   `figures/<topic>/[<value>/]<output>.<ext>`, with each figure saved in every format in
   `FIG_EXTENSIONS` (in `inputs.py`), so `fig_paths` maps each figure to a list of paths.
@@ -107,7 +128,7 @@ from several analyses or several runs of one (e.g. overlapping sets of model spe
   docstrings or comments; they go stale on any renumbering.
 
 To add an analysis or plot script: write it, add its `get_inputs_<name>()` and path getter to
-`inputs.py`, and add its rule to the Snakefile.
+`inputs.py`, and add its rule to the Snakefile (for an analysis, with the `as_param` param).
 
 ## Tests
 
