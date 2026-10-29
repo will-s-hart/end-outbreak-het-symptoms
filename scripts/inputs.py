@@ -136,17 +136,17 @@ def get_inputs_delay_distributions():
     serial_interval_cont_params = {
         "mean": 15.3,
         "sd": 9.3,
-        "max": 150,
+        "max": 120,
         "allow_zero": False,
     }
-    inc_period_cont_params = {"mean": 11.4, "sd": 8.1, "max": 150, "allow_zero": False}
+    inc_period_cont_params = {"mean": 11.4, "sd": 8.1, "max": 120, "allow_zero": False}
     tost_cont_params = {
         "mean": serial_interval_cont_params["mean"] - inc_period_cont_params["mean"],
         "sd": (
             serial_interval_cont_params["sd"] ** 2 - inc_period_cont_params["sd"] ** 2
         )
         ** 0.5,
-        "max": 150,
+        "max": 120,
         "allow_zero": True,
     }
     return {
@@ -173,6 +173,16 @@ def get_inputs_model_fits(*, model_spec_name):
         "n_evidence_proposal_samples": N_EVIDENCE_PROPOSAL_SAMPLES,
         "rng": np.random.default_rng(seed=42),
         "results_paths": get_results_paths_model_fits(model_spec_name=model_spec_name),
+    }
+
+
+def get_inputs_delay_distributions_plots():
+    return {
+        "delay_distributions_results_paths": get_results_paths_delay_distributions(),
+        # Shared by the figures so they can be compared, and past the 99th percentile of
+        # every delay
+        "max_plot_lag": 50,
+        "fig_paths": get_fig_paths_delay_distributions_plots(),
     }
 
 
@@ -232,6 +242,15 @@ def get_results_paths_model_fits(*, model_spec_name):
         "evidence": results_dir / "evidence.csv",
         "posterior": results_dir / "posterior.csv",
         "trace": results_dir / "trace.nc",
+    }
+
+
+def get_fig_paths_delay_distributions_plots():
+    # One path per file format for each figure
+    fig_dir = pathlib.Path("figures/delay_distributions")
+    return {
+        fig_name: [fig_dir / f"{fig_name}.{ext}" for ext in FIG_EXTENSIONS]
+        for fig_name in ("serial_interval", "inc_period", "tost")
     }
 
 

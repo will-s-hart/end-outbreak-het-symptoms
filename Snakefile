@@ -4,6 +4,7 @@ from scripts.inputs import (
     COMPARISON_SPECS,
     DATA_PATH,
     MODEL_SPECS,
+    get_fig_paths_delay_distributions_plots,
     get_fig_paths_model_comparison_plots,
     get_inputs_delay_distributions,
     get_inputs_model_fits,
@@ -26,6 +27,11 @@ shared_input_paths = [*package_paths, "scripts/inputs.py"]
 delay_distributions_results_paths = list(
     get_results_paths_delay_distributions().values()
 )
+delay_distributions_plots_fig_paths = [
+    path
+    for paths in get_fig_paths_delay_distributions_plots().values()
+    for path in paths
+]
 
 
 def model_fits_results_paths(*, model_spec_name):
@@ -51,8 +57,11 @@ results_paths = [
     ),
 ]
 figure_paths = [
-    model_comparison_plots_fig_paths(comparison_spec_name=comparison_spec_name)
-    for comparison_spec_name in COMPARISON_SPECS
+    delay_distributions_plots_fig_paths,
+    *(
+        model_comparison_plots_fig_paths(comparison_spec_name=comparison_spec_name)
+        for comparison_spec_name in COMPARISON_SPECS
+    ),
 ]
 
 
@@ -103,6 +112,17 @@ rule model_fits:
     threads: lambda wildcards: workflow.cores
     shell:
         "pixi run python -m scripts.model_fits --spec {wildcards.spec}"
+
+
+rule delay_distributions_plots:
+    input:
+        shared_input_paths,
+        "scripts/delay_distributions_plots.py",
+        delay_distributions_results_paths,
+    output:
+        delay_distributions_plots_fig_paths,
+    shell:
+        "pixi run python -m scripts.delay_distributions_plots"
 
 
 # One rule per comparison spec rather than a wildcard, since which figures are made depends

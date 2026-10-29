@@ -35,6 +35,12 @@ _RISK_TYPE_YLABELS = {
     "reports": "Risk of additional reported cases",
 }
 
+_DELAY_XLABELS = {
+    "serial_interval": "Serial interval (days)",
+    "inc_period": "Incubation period (days)",
+    "tost": "Time from symptom onset to transmission (days)",
+}
+
 
 def plot_densities(
     *, posterior_df_by_model, priors, param_name, log_x=False, legend=True
@@ -175,6 +181,27 @@ def plot_risk_incidence_overlay(
     # Draw the primary axis (curves, legend) above the incidence bars.
     ax.set_zorder(twin_ax.get_zorder() + 1)
     ax.patch.set_visible(False)
+    return fig
+
+
+def plot_delay_distribution(
+    *, delay_df, delay_name, max_lag, label=None, overlay_df=None, overlay_label=None
+):
+    # Probability mass by lag as bars, optionally with another distribution's as a line
+    fig, ax = plt.subplots()
+    bars = ax.bar(
+        delay_df["lag"], delay_df["prob"], width=1, color="darkgray", label=label
+    )
+    if overlay_df is not None:
+        (line,) = ax.plot(
+            overlay_df["lag"], overlay_df["prob"], color="tab:red", label=overlay_label
+        )
+        # Bars first, which matplotlib would otherwise list after lines
+        ax.legend(handles=[bars, line])
+    ax.set_xlim(-0.5, max_lag + 0.5)
+    ax.set_ylim(bottom=0)
+    ax.set_xlabel(_DELAY_XLABELS[delay_name])
+    ax.set_ylabel("Probability")
     return fig
 
 

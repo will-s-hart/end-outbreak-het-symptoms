@@ -10,6 +10,7 @@ from scripts.inputs import (
     FIG_EXTENSIONS,
     MODEL_SPECS,
     get_inputs_delay_distributions,
+    get_inputs_delay_distributions_plots,
     get_inputs_model_comparison_plots,
     get_inputs_model_fits,
     get_results_paths_delay_distributions,
@@ -113,6 +114,22 @@ def test_get_inputs_delay_distributions():
     assert inputs["results_paths"] == get_results_paths_delay_distributions()
     assert inputs["cont_params_by_delay"].keys() == inputs["results_paths"].keys()
     as_param(inputs=inputs)
+
+
+def test_get_inputs_delay_distributions_plots():
+    inputs = get_inputs_delay_distributions_plots()
+    # Reads the results where the analysis writes them, with a figure for each
+    assert (
+        inputs["delay_distributions_results_paths"]
+        == get_results_paths_delay_distributions()
+    )
+    fig_paths = inputs["fig_paths"]
+    assert fig_paths.keys() == inputs["delay_distributions_results_paths"].keys()
+    for fig_name, paths in fig_paths.items():
+        assert [path.suffix for path in paths] == [f".{ext}" for ext in FIG_EXTENSIONS]
+        for path in paths:
+            assert path.parent == pathlib.Path("figures/delay_distributions")
+            assert path.stem == fig_name
 
 
 def test_get_inputs_model_fits_reads_delay_distributions_results(*, monkeypatch):
