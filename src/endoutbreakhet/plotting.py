@@ -1,3 +1,5 @@
+import matplotlib.colors
+import matplotlib.patches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -33,6 +35,20 @@ _RISK_TYPE_YLABELS = {
     "transmission": "Risk of additional transmission",
     "sustained": "Risk of sustained transmission",
     "reports": "Risk of additional reported cases",
+}
+
+_GATE_STATUS_COLORS = {
+    "pass": "tab:green",
+    "fail": "tab:red",
+    "unassessed": "lightgray",
+}
+
+_GATE_CRITERION_TITLES = {
+    "rhat": r"$\hat{R}$",
+    "ess_bulk": "Bulk ESS",
+    "ess_tail": "Tail ESS",
+    "divergences": "Divergences",
+    "risk": "Risk",
 }
 
 _DELAY_XLABELS = {
@@ -200,6 +216,95 @@ def plot_delay_distribution(
     ax.set_ylim(bottom=0)
     ax.set_xlabel(_DELAY_XLABELS[delay_name])
     ax.set_ylabel("Probability")
+    return fig
+
+
+def plot_fit_gate(
+    *,
+    status_by_criterion,
+    fit_status,
+    evidence_status,
+    spec_names,
+    days,
+    comparison_day,
+):
+    # One panel for each criterion's statuses ("pass", "fail" or "unassessed"), of shape
+    # (specs, days) over consecutive days, with the comparison day marked and the risk cells
+    # hatched where fit_status is "fail" (their MCSE is then conditional on a failed fit),
+    # and a column of each spec's evidence status
+    n_specs = len(spec_names)
+    criteria = list(status_by_criterion)
+    status_codes = {status: code for code, status in enumerate(_GATE_STATUS_COLORS)}
+    cmap = matplotlib.colors.ListedColormap(list(_GATE_STATUS_COLORS.values()))
+
+    def _plot_statuses(*, ax, statuses, x_lims):
+        ax.imshow(
+            np.vectorize(status_codes.__getitem__)(statuses),
+            cmap=cmap,
+            vmin=-0.5,
+            vmax=len(status_codes) - 0.5,
+            aspect="auto",
+            interpolation="nearest",
+            extent=(*x_lims, n_specs - 0.5, -0.5),
+        )
+
+    fig, axes = plt.subplots(
+        1,
+        len(criteria) + 1,
+        sharey=True,
+        figsize=(2.5 * len(criteria) + 1, 0.25 * n_specs + 1.5),
+        width_ratios=[*[len(days)] * len(criteria), max(1, len(days) // 15)],
+        layout="constrained",
+    )
+    for ax, criterion in zip(axes[:-1], criteria, strict=True):
+        _plot_statuses(
+            ax=ax,
+            statuses=np.asarray(status_by_criterion[criterion]),
+            x_lims=(days[0] - 0.5, days[-1] + 0.5),
+        )
+        ax.axvline(comparison_day, color="black", linestyle="--")
+        ax.set_title(_GATE_CRITERION_TITLES[criterion])
+        ax.set_xlabel("Day")
+    risk_ax = axes[criteria.index("risk")]
+    for spec_idx, day_idx in zip(
+        *np.nonzero(np.asarray(fit_status) == "fail"), strict=True
+    ):
+        risk_ax.add_patch(
+            matplotlib.patches.Rectangle(
+                (days[day_idx] - 0.5, spec_idx - 0.5),
+                1,
+                1,
+                fill=False,
+                edgecolor="black",
+                hatch="////",
+                linewidth=0,
+            )
+        )
+    evidence_ax = axes[-1]
+    _plot_statuses(
+        ax=evidence_ax,
+        statuses=np.asarray(evidence_status)[:, None],
+        x_lims=(-0.5, 0.5),
+    )
+    # Labelled below, as a title would be wider than the column
+    evidence_ax.set_xticks([0], labels=["Evidence"], rotation=90)
+    axes[0].set_yticks(np.arange(n_specs), labels=spec_names)
+    fig.legend(
+        handles=[
+            *(
+                matplotlib.patches.Patch(facecolor=color, label=status)
+                for status, color in _GATE_STATUS_COLORS.items()
+            ),
+            matplotlib.patches.Patch(
+                facecolor="white",
+                edgecolor="black",
+                hatch="////",
+                label="risk given a failed fit",
+            ),
+        ],
+        loc="outside lower center",
+        ncols=len(_GATE_STATUS_COLORS) + 1,
+    )
     return fig
 
 

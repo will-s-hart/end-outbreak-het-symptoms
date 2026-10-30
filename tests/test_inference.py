@@ -1,12 +1,21 @@
 # Note that AI tools were used to generate tests
+import itertools
+
+import arviz_stats
 import numpy as np
 import pymc as pm
 import pytest
 import scipy.special
 import scipy.stats
+import xarray as xr
 
 from endoutbreakhet import DelayDistribution
-from endoutbreakhet.inference import _build_pymc_model, fit_model
+from endoutbreakhet.inference import (
+    _build_pymc_model,
+    _dispersed_starts,
+    compute_fit_diagnostics,
+    fit_model,
+)
 from endoutbreakhet.risk import compute_risk
 from endoutbreakhet.utils import parse_lognormal_prior
 
@@ -375,7 +384,7 @@ def test_fit_model(*, model_name, step, reporting_prob, toy_inputs):
             trace=trace,
             reporting_prob=reporting_prob,
             risk_type=risk_type,
-        )
+        )["risk"]
         for risk_type in ("cases", "transmission", "sustained", "reports")
     }
     assert 0 <= risks["sustained"] <= risks["transmission"] <= risks["cases"] <= 1
@@ -403,6 +412,287 @@ def test_incompatible_step_raises(*, step, toy_inputs_under_reporting):
             rng=np.random.default_rng(0),
             step=step,
         )
+
+
+@pytest.mark.parametrize("kwarg", ["initvals", "init", "jitter_max_retries"])
+def test_fit_model_rejects_initialisation_kwargs(*, kwarg, toy_inputs):
+    # fit_model sets the chains' starts itself
+    with pytest.raises(ValueError, match=kwarg):
+        fit_model(
+            model_name="poisson",
+            **toy_inputs,
+            rng=np.random.default_rng(0),
+            **{kwarg: None},
+        )
+
+
+def test_fit_model_counts_divergences_before_thinning(*, toy_inputs):
+    # A huge step size without tuning makes every draw diverge, and thinning drops half of
+    # them from the sample stats, but not from the count
+    traces = {
+        thin: fit_model(
+            model_name="poisson",
+            **toy_inputs,
+            rng=np.random.default_rng(0),
+            thin=thin,
+            chains=2,
+            cores=1,
+            tune=0,
+            draws=20,
+            progressbar=False,
+            compute_convergence_checks=False,
+            nuts={"step_scale": 20},
+        )
+        for thin in (1, 2)
+    }
+    n_divergences = int(traces[1].sample_stats["diverging"].sum())
+    assert n_divergences > int(traces[2].sample_stats["diverging"].sum())
+    for trace in traces.values():
+        assert trace.sample_stats.attrs["n_divergences"] == n_divergences
+
+
+def test_fit_model_under_reporting_with_several_chains(*, toy_inputs_under_reporting):
+    # NUTS for the continuous variables (so divergences are counted) and Metropolis for the
+    # unreported cases, each chain from its own start
+    trace = fit_model(
+        model_name="ssi",
+        **toy_inputs_under_reporting,
+        rng=np.random.default_rng(0),
+        chains=3,
+        cores=1,
+        tune=10,
+        draws=10,
+        progressbar=False,
+        compute_convergence_checks=False,
+    )
+    assert trace.posterior.sizes["chain"] == 3
+    assert "n_divergences" in trace.sample_stats.attrs
+
+
+def test_dispersed_starts(*, model_name, toy_inputs_under_reporting):
+    # Data followed by a long run of days without reports. Every chain's start has finite
+    # density and its own jittered continuous variables, and the unreported cases are at
+    # their initial values plus the chain's index on each day with reported cases, so
+    # they're at their initial values (zero) on the days after the data
+    n_extra_days = 40
+    inputs = toy_inputs_under_reporting | {
+        "reported_incidence_vec": np.pad(
+            toy_inputs_under_reporting["reported_incidence_vec"], (0, n_extra_days)
+        )
+    }
+    model = _build_pymc_model(model_name=model_name, **inputs)
+    starts = _dispersed_starts(
+        model=model,
+        reported_incidence_vec=inputs["reported_incidence_vec"],
+        chains=3,
+        rng=np.random.default_rng(0),
+    )
+
+    logp_func = model.compile_logp()
+    assert all(np.isfinite(logp_func(start)) for start in starts)
+    for var in model.continuous_value_vars:
+        for start_a, start_b in itertools.combinations(starts, 2):
+            assert np.all(start_a[var.name] != start_b[var.name])
+    initial_unreported_incidence = model.initial_point()["unreported_incidence"]
+    np.testing.assert_array_equal(initial_unreported_incidence[-n_extra_days:], 0)
+    for chain, start in enumerate(starts):
+        np.testing.assert_array_equal(
+            start["unreported_incidence"],
+            initial_unreported_incidence
+            + chain * (inputs["reported_incidence_vec"][1:] > 0),
+        )
+
+
+def test_dispersed_starts_redraws_nonfinite_density(*, toy_inputs, monkeypatch):
+    # Starts with NaN or infinite log density are redrawn, until one is finite
+    model = _build_pymc_model(model_name="poisson", **toy_inputs, reporting_prob=1.0)
+    logps = iter([np.nan, -np.inf, np.inf, -3.0])
+    monkeypatch.setattr(
+        model, "compile_logp", lambda **kwargs: lambda point: next(logps)
+    )
+    _dispersed_starts(
+        model=model,
+        reported_incidence_vec=toy_inputs["reported_incidence_vec"],
+        chains=1,
+        rng=np.random.default_rng(0),
+    )
+    assert next(logps, None) is None
+
+
+def test_dispersed_starts_raises_when_none_finite(*, toy_inputs, monkeypatch):
+    # Naming the chain, with the log density of each term at the last start
+    model = _build_pymc_model(model_name="poisson", **toy_inputs, reporting_prob=1.0)
+    monkeypatch.setattr(model, "compile_logp", lambda **kwargs: lambda point: -np.inf)
+    with pytest.raises(RuntimeError, match=r"chain 0 in 10 attempts.*rep_no_before"):
+        _dispersed_starts(
+            model=model,
+            reported_incidence_vec=toy_inputs["reported_incidence_vec"],
+            chains=2,
+            rng=np.random.default_rng(0),
+        )
+
+
+def test_fit_diagnostics_classify_elements():
+    # Of four elements, one mixes well, one is constant and two have a non-finite draw (an
+    # infinite one would still give R-hat near 1), so only the first is diagnosed
+    rng = np.random.default_rng(0)
+    values = rng.normal(size=(4, 500, 4))
+    values[..., 1] = 2.0
+    values[0, 7, 2] = np.inf
+    values[3, 9, 3] = np.nan
+    diagnostics = compute_fit_diagnostics(
+        trace=_synthetic_trace(posterior={"x": (("chain", "draw", "x_dim"), values)})
+    )
+    assert diagnostics["n_nonfinite_x"] == 2
+    assert diagnostics["n_constant_x"] == 1
+    assert diagnostics["n_diagnosed_x"] == 1
+    mixed_values = values[..., 0]
+    expected = {
+        "rhat_x": arviz_stats.rhat(mixed_values),
+        "ess_bulk_x": arviz_stats.ess(mixed_values),
+        "ess_tail_x": arviz_stats.ess(mixed_values, method="tail", prob=(0.05, 0.95)),
+    }
+    for name, value in expected.items():
+        worst = "max" if name.startswith("rhat") else "min"
+        assert diagnostics[f"{worst}_{name}"] == pytest.approx(value)
+        assert diagnostics[f"median_{name}"] == pytest.approx(value)
+    assert diagnostics["max_rhat_x"] < 1.01
+
+
+def test_fit_diagnostics_worst_and_median_over_elements():
+    # A well-mixed element and one whose chains are apart: the worst R-hat is the second's,
+    # past 1.01, and the median is between the two
+    rng = np.random.default_rng(0)
+    values = rng.normal(size=(4, 500, 2))
+    values[..., 1] += np.arange(4)[:, None]
+    diagnostics = compute_fit_diagnostics(
+        trace=_synthetic_trace(posterior={"x": (("chain", "draw", "x_dim"), values)})
+    )
+    rhat_vec = arviz_stats.rhat(values)
+    assert diagnostics["max_rhat_x"] == pytest.approx(np.max(rhat_vec))
+    assert diagnostics["median_rhat_x"] == pytest.approx(np.median(rhat_vec))
+    assert diagnostics["max_rhat_x"] > 1.01
+    assert diagnostics["min_ess_bulk_x"] == pytest.approx(
+        np.min(arviz_stats.ess(values))
+    )
+
+
+def test_fit_diagnostics_chains_stuck_apart():
+    # Each chain stuck at its own value
+    values = np.repeat(np.arange(4.0)[:, None], 500, axis=1)
+    diagnostics = compute_fit_diagnostics(
+        trace=_synthetic_trace(posterior={"x": (("chain", "draw"), values)})
+    )
+    assert diagnostics["n_diagnosed_x"] == 1
+    assert not diagnostics["max_rhat_x"] <= 1.01
+
+
+def test_fit_diagnostics_constant_variable():
+    # A fixed parameter is constant, so it has no elements to diagnose and NaN statistics
+    diagnostics = compute_fit_diagnostics(
+        trace=_synthetic_trace(
+            posterior={"dispersion": (("chain", "draw"), np.full((4, 100), 0.18))}
+        )
+    )
+    assert diagnostics["n_constant_dispersion"] == 1
+    assert diagnostics["n_diagnosed_dispersion"] == 0
+    for stat_name in ("rhat", "ess_bulk", "ess_tail"):
+        worst = "max" if stat_name == "rhat" else "min"
+        assert np.isnan(diagnostics[f"{worst}_{stat_name}_dispersion"])
+        assert np.isnan(diagnostics[f"median_{stat_name}_dispersion"])
+
+
+@pytest.mark.parametrize("separated", [False, True])
+def test_fit_diagnostics_sparse_counts(*, separated):
+    # Rare unreported cases (in 2% of draws) mix well when spread over the chains, but not
+    # when all in one chain
+    rng = np.random.default_rng(0)
+    counts = np.zeros((4, 1000), dtype=np.int64)
+    if separated:
+        counts[0, rng.choice(1000, size=80, replace=False)] = 1
+    else:
+        counts.reshape(-1)[rng.choice(4000, size=80, replace=False)] = 1
+    diagnostics = compute_fit_diagnostics(
+        trace=_synthetic_trace(
+            posterior={
+                "unreported_incidence": (
+                    ("chain", "draw", "local_day"),
+                    counts[..., None],
+                )
+            }
+        )
+    )
+    assert diagnostics["n_diagnosed_unreported_incidence"] == 1
+    passes = (
+        diagnostics["max_rhat_unreported_incidence"] <= 1.01
+        and diagnostics["min_ess_bulk_unreported_incidence"] >= 400
+        and diagnostics["min_ess_tail_unreported_incidence"] >= 400
+    )
+    assert passes != separated
+    assert diagnostics["mean_total_unreported"] == pytest.approx(0.02)
+
+
+@pytest.mark.parametrize("n_divergences", [None, 3])
+def test_fit_diagnostics_divergences(*, n_divergences):
+    # NaN without a count (NUTS didn't run)
+    rng = np.random.default_rng(0)
+    diagnostics = compute_fit_diagnostics(
+        trace=_synthetic_trace(
+            posterior={"x": (("chain", "draw"), rng.normal(size=(2, 100)))},
+            sample_stats_attrs=(
+                {} if n_divergences is None else {"n_divergences": n_divergences}
+            ),
+        )
+    )
+    if n_divergences is None:
+        assert np.isnan(diagnostics["n_divergences"])
+    else:
+        assert diagnostics["n_divergences"] == n_divergences
+    assert "mean_total_unreported" not in diagnostics
+
+
+def test_fit_diagnostics_of_fit(*, toy_inputs_under_reporting):
+    # Every posterior variable of a real fit, deterministics included, with counts of
+    # elements that cover them all
+    trace = fit_model(
+        model_name="ssi",
+        **toy_inputs_under_reporting,
+        rng=np.random.default_rng(0),
+        chains=2,
+        cores=1,
+        tune=20,
+        draws=20,
+        progressbar=False,
+        compute_convergence_checks=False,
+    )
+    diagnostics = compute_fit_diagnostics(trace=trace)
+    for name, values in trace.posterior.data_vars.items():
+        n_elements = values.size // (values.sizes["chain"] * values.sizes["draw"])
+        assert (
+            diagnostics[f"n_nonfinite_{name}"]
+            + diagnostics[f"n_constant_{name}"]
+            + diagnostics[f"n_diagnosed_{name}"]
+            == n_elements
+        )
+    assert {"total_incidence", "cohort_inf", "unreported_incidence"} <= {
+        name.removeprefix("n_diagnosed_")
+        for name in diagnostics
+        if name.startswith("n_diagnosed_")
+    }
+    assert diagnostics["n_divergences"] >= 0
+    assert diagnostics["mean_total_unreported"] == pytest.approx(
+        float(trace.posterior["unreported_incidence"].sum(dim="local_day").mean())
+    )
+
+
+def _synthetic_trace(*, posterior, sample_stats_attrs=None):
+    # A trace with the posterior variables given as (dims, values)
+    return xr.DataTree.from_dict(
+        {
+            "posterior": xr.Dataset(posterior),
+            "sample_stats": xr.Dataset(attrs=sample_stats_attrs or {}),
+        }
+    )
 
 
 def _expected_incidence(

@@ -32,6 +32,7 @@ def run_analyses(*, model_spec_name):
     results_paths = inputs["results_paths"]
     results_paths["risk"].parent.mkdir(parents=True, exist_ok=True)
     outputs["risk_df"].to_csv(results_paths["risk"], index=False)
+    outputs["diagnostics_df"].to_csv(results_paths["diagnostics"], index=False)
     pd.DataFrame([outputs["evidence"]]).to_csv(results_paths["evidence"], index=False)
     # Scalar parameter samples, tracked so plots can be remade without the (untracked)
     # full trace
@@ -46,8 +47,8 @@ def run_analyses(*, model_spec_name):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=(
-            "Fit a model spec to the data available up to each day, saving the risks, "
-            "and the posterior and evidence on the comparison day."
+            "Fit a model spec to the data available up to each day, saving the risks and "
+            "fit diagnostics, and the posterior and evidence on the comparison day."
         )
     )
     parser.add_argument("--spec", required=True, choices=MODEL_SPECS)

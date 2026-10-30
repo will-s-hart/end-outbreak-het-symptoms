@@ -1,5 +1,5 @@
 from endoutbreakhet.evidence import compute_log_evidence, compute_model_probabilities
-from endoutbreakhet.inference import fit_model
+from endoutbreakhet.inference import compute_fit_diagnostics, fit_model
 from endoutbreakhet.pipeline import run_pipeline
 from endoutbreakhet.risk import compute_risk
 from endoutbreakhet.utils import (
@@ -13,6 +13,7 @@ from endoutbreakhet.utils import (
 __all__ = [
     "DELAY_FIRST_LAGS",
     "DelayDistribution",
+    "compute_fit_diagnostics",
     "compute_log_evidence",
     "compute_model_probabilities",
     "compute_risk",

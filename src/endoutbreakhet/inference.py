@@ -1,8 +1,11 @@
+import functools
 from collections.abc import Sequence
 
+import arviz_stats
 import numpy as np
 import pymc as pm
 import pytensor.tensor as pt
+from pymc.initial_point import make_initial_point_fn
 from pymc.step_methods.compound import Competence, CompoundStep
 
 from endoutbreakhet.utils import (
@@ -11,6 +14,8 @@ from endoutbreakhet.utils import (
     parse_lognormal_prior,
     validate_delay_distributions,
 )
+
+_MAX_INIT_ATTEMPTS = 10
 
 
 def fit_model(
@@ -23,6 +28,7 @@ def fit_model(
     rng,
     reporting_prob=1.0,
     step=None,
+    chains=4,
     thin=1,
     **sample_kwargs,
 ):
@@ -30,7 +36,16 @@ def fit_model(
     # independently with probability reporting_prob (the day-0 cases are imported, and taken
     # to be reported). step, if given, is either a step method class (e.g. pm.Slice) for the
     # continuous variables, leaving pm.sample to assign Metropolis to any unreported case
-    # counts, or a factory for step methods with explicit variables
+    # counts, or a factory for step methods with explicit variables. Each chain starts from
+    # its own point (see _dispersed_starts), and the number of divergences after warm-up (if
+    # NUTS ran) is kept in the sample stats' attrs as n_divergences
+    owned_kwargs = sorted(
+        {"initvals", "init", "jitter_max_retries"} & set(sample_kwargs)
+    )
+    if owned_kwargs:
+        raise ValueError(
+            f"fit_model sets the chains' starts, so doesn't take {', '.join(owned_kwargs)}"
+        )
     pm_model = _build_pymc_model(
         model_name=model_name,
         reported_incidence_vec=reported_incidence_vec,
@@ -49,7 +64,26 @@ def fit_model(
         if step is not None:
             _check_step(step=sample_kwargs["step"], model=pm_model)
 
-        trace = pm.sample(random_seed=rng, **sample_kwargs)
+        # Exact starts on both of pm.sample's paths: "adapt_diag" stops it jittering them
+        # where NUTS samples every variable, and it never does otherwise
+        trace = pm.sample(
+            chains=chains,
+            initvals=_dispersed_starts(
+                model=pm_model,
+                reported_incidence_vec=reported_incidence_vec,
+                chains=chains,
+                rng=rng,
+            ),
+            init="adapt_diag",
+            random_seed=rng,
+            **sample_kwargs,
+        )
+    # Counted before thinning, which would leave out divergent draws
+    n_divergences = (
+        int(trace.sample_stats["diverging"].sum())
+        if "diverging" in trace.sample_stats
+        else None
+    )
     if thin > 1:
         trace = trace.isel(draw=slice(0, None, thin))
         trace = trace.map_over_datasets(
@@ -59,7 +93,33 @@ def fit_model(
                 else ds
             )
         )
+    if n_divergences is not None:
+        trace.sample_stats.attrs["n_divergences"] = n_divergences
     return trace
+
+
+def compute_fit_diagnostics(*, trace):
+    # Convergence diagnostics of a fit from fit_model: the number of divergences after
+    # warm-up (NaN if NUTS didn't run), and for each posterior variable (deterministics
+    # included, as risks are computed from them) the numbers of elements with a non-finite
+    # draw, of finite elements that are the same in every draw, and of the rest, over which
+    # the worst and median rank-normalised R-hat and bulk and tail ESS are taken (NaN if
+    # there are none). Elements with a non-finite draw are left out, since an infinite draw
+    # can still give R-hat near 1, as are constant ones, which have no R-hat (whether they're
+    # rare-event samples or chains stuck together). The keys depend only on the model, so
+    # diagnostics of fits to different days stack. Also the posterior mean total of any
+    # unreported cases
+    diagnostics = {
+        "n_divergences": trace.sample_stats.attrs.get("n_divergences", np.nan)
+    }
+    posterior = trace.posterior
+    for name, values in posterior.data_vars.items():
+        diagnostics |= _variable_diagnostics(name=name, values=values.values)
+    if "unreported_incidence" in posterior:
+        diagnostics["mean_total_unreported"] = float(
+            posterior["unreported_incidence"].sum(dim="local_day").mean()
+        )
+    return diagnostics
 
 
 def _build_pymc_model(
@@ -562,3 +622,73 @@ def _check_step(*, step, model):
                 f"{type(step).__name__} can't sample the discrete variable {var.name}: "
                 "leave it to pm.sample's automatic assignment, or use pm.Metropolis"
             )
+
+
+def _dispersed_starts(*, model, reported_incidence_vec, chains, rng):
+    # A start for each chain, by transformed variable name: the model's initial point with
+    # U(-1, 1) jitter on the continuous variables in sampling space (as pm.sample applies
+    # only where NUTS samples every variable), and any unreported case counts at their
+    # initial values plus the chain's index on each day with reported cases. Those days
+    # already have nonzero force of infection/disease, and adding cases only raises it on
+    # later days, so the counts stay in the support. Other days, which may have zero force,
+    # keep their initial values: Metropolis updates each count separately, with its own
+    # tuned scale, so a count at zero in every draw of every chain is more likely rarely
+    # above zero than stuck. Each start is redrawn until it has finite density (a jittered
+    # gamma latent can underflow to zero)
+    initial_point_func = make_initial_point_fn(
+        model=model,
+        jitter_rvs={model.values_to_rvs[var] for var in model.continuous_value_vars},
+        return_transformed=True,
+    )
+    logp_func = model.compile_logp()
+    starts = []
+    for chain in range(chains):
+        extra_unreported_vec = chain * (reported_incidence_vec[1:] > 0)
+        for _ in range(_MAX_INIT_ATTEMPTS):
+            start = initial_point_func(rng.integers(2**30))
+            if "unreported_incidence" in start:
+                start["unreported_incidence"] = (
+                    start["unreported_incidence"] + extra_unreported_vec
+                )
+            if np.isfinite(logp_func(start)):
+                break
+        else:
+            raise RuntimeError(
+                f"No start with finite log density for chain {chain} in "
+                f"{_MAX_INIT_ATTEMPTS} attempts. Log densities at the last: "
+                f"{model.point_logps(start)}"
+            )
+        starts.append(start)
+    return starts
+
+
+def _variable_diagnostics(*, name, values):
+    # Diagnostics of a posterior variable with values of shape (chains, draws, ...), as in
+    # compute_fit_diagnostics
+    element_values = values.reshape(*values.shape[:2], -1).astype(float)
+    is_nonfinite_vec = ~np.all(np.isfinite(element_values), axis=(0, 1))
+    is_constant_vec = ~is_nonfinite_vec & np.all(
+        element_values == element_values[:1, :1], axis=(0, 1)
+    )
+    diagnosed_values = element_values[..., ~is_nonfinite_vec & ~is_constant_vec]
+    n_diagnosed = diagnosed_values.shape[-1]
+    diagnostics = {
+        f"n_nonfinite_{name}": int(is_nonfinite_vec.sum()),
+        f"n_constant_{name}": int(is_constant_vec.sum()),
+        f"n_diagnosed_{name}": n_diagnosed,
+    }
+    # The worst of each over the elements, and their median, which NaNs propagate to
+    for stat_name, worst_name, worst_func, stat_func in [
+        ("rhat", "max", np.max, arviz_stats.rhat),
+        ("ess_bulk", "min", np.min, arviz_stats.ess),
+        (
+            "ess_tail",
+            "min",
+            np.min,
+            functools.partial(arviz_stats.ess, method="tail", prob=(0.05, 0.95)),
+        ),
+    ]:
+        stat_vec = stat_func(diagnosed_values) if n_diagnosed else np.full(1, np.nan)
+        diagnostics[f"{worst_name}_{stat_name}_{name}"] = float(worst_func(stat_vec))
+        diagnostics[f"median_{stat_name}_{name}"] = float(np.median(stat_vec))
+    return diagnostics

@@ -11,14 +11,18 @@ that produces the numerical results and figures.
 
 **Status:** the library (model fitting, risk, evidence, the rolling-fit pipeline and
 plotting), the `delay_distributions` and `model_fits` analysis scripts (the first discretises
-the delay distributions the fits read) and the `delay_distributions_plots` and
-`model_comparison_plots` plot scripts exist, each with Snakemake rules. Model fitting, risk,
-evidence and the pipeline support under-reporting with a known reporting probability
-(`reporting_prob`, set per model spec, with 60% and 80% reporting specs alongside the
-complete-reporting ones). Risk covers additional cases, transmission, sustained transmission
-and reported cases (DLO: cases and transmission only), and the pipeline records every risk
-type the model has. Keep this file in step as more land: describe what exists, not what is
-planned.
+the delay distributions the fits read) and the `delay_distributions_plots`,
+`model_comparison_plots` and `fit_diagnostics_plots` plot scripts exist, each with Snakemake
+rules. Model fitting, risk, evidence and the pipeline support under-reporting with a known
+reporting probability (`reporting_prob`, set per model spec, with 60% and 80% reporting specs
+alongside the complete-reporting ones). Risk covers additional cases, transmission, sustained
+transmission and reported cases (DLO: cases and transmission only), and the pipeline records
+every risk type the model has, with its Monte Carlo SE and R̂. Each fit's chains start from
+dispersed points, and the pipeline saves every day's convergence diagnostics (R̂, bulk/tail
+ESS, divergences). `fit_diagnostics_plots` applies the fit gate's thresholds
+(`FIT_GATE_THRESHOLDS` in `inputs.py`) to the diagnostics, risks and log evidence SEs,
+reporting failures without blocking anything downstream. Keep this file in step as more land:
+describe what exists, not what is planned.
 
 ## Layout
 

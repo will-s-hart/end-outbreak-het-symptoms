@@ -1,6 +1,7 @@
 # Note that AI tools were used to generate tests
 import types
 
+import arviz_stats
 import numpy as np
 import pytest
 import scipy.stats
@@ -102,7 +103,7 @@ def test_naive_risk_matches_notes(
         reporting_prob=reporting_prob,
         risk_type=risk_type,
     )
-    assert result == pytest.approx(expected, rel=1e-10, abs=0)
+    assert result["risk"] == pytest.approx(expected, rel=1e-10, abs=0)
 
 
 # Last case on day 11 and TOST lags 0-2, so with complete reporting no remaining
@@ -196,7 +197,7 @@ def test_so_risk_matches_notes(
         reporting_prob=reporting_prob,
         risk_type=risk_type,
     )
-    assert result == pytest.approx(expected, rel=1e-10, abs=0)
+    assert result["risk"] == pytest.approx(expected, rel=1e-10, abs=0)
 
 
 @pytest.mark.parametrize("reporting_prob", [1.0, 0.5])
@@ -217,7 +218,7 @@ def test_risk_orderings(*, model_name, reporting_prob, risk_inputs):
             trace=types.SimpleNamespace(posterior=posterior),
             reporting_prob=reporting_prob,
             risk_type=risk_type,
-        )
+        )["risk"]
         for risk_type in _RISK_TYPES
     }
     assert 0 < risks["sustained"] <= risks["transmission"] <= risks["cases"] < 1
@@ -249,7 +250,61 @@ def test_sse_so_risk_before_first_infectious_day(*, risk_type):
         trace=types.SimpleNamespace(posterior=posterior),
         risk_type=risk_type,
     )
-    assert result == pytest.approx(0.5)
+    assert result["risk"] == pytest.approx(0.5)
+
+
+def test_risk_mcse_and_rhat_by_chain():
+    # A day-0 case has all its infectiousness to come, so each sample's risk of cases is
+    # 1 - exp(-R). The second chain is shifted, so R-hat flags it only if the samples are
+    # split into chains the right way
+    rng = np.random.default_rng(0)
+    rep_no_before = rng.lognormal(size=(3, 40))
+    rep_no_before[1] += 1
+    posterior = xr.Dataset(
+        {
+            "rep_no_before": (("chain", "draw"), rep_no_before),
+            "rep_no_after": (("chain", "draw"), np.ones((3, 40))),
+        }
+    )
+    result = risk.compute_risk(
+        model_name="poisson",
+        reported_incidence_vec=np.array([1]),
+        switch_day=0,
+        delay_distributions={
+            "serial_interval": DelayDistribution(prob=np.array([1.0]), first_lag=1)
+        },
+        trace=types.SimpleNamespace(posterior=posterior),
+    )
+    risk_samples = -np.expm1(-rep_no_before)
+    assert result["risk"] == pytest.approx(np.mean(risk_samples))
+    assert result["risk_mcse"] == pytest.approx(
+        arviz_stats.mcse(risk_samples, method="mean")
+    )
+    assert result["risk_rhat"] == pytest.approx(arviz_stats.rhat(risk_samples))
+    assert result["risk_rhat"] > 1.1
+
+
+def test_constant_risk_has_zero_mcse():
+    # Every sample's risk of cases is the same, 1 - exp(-1.3), for which arviz's MCSE is
+    # rounding error rather than zero, so it's set to zero, with no R-hat
+    posterior = xr.Dataset(
+        {
+            name: (("chain", "draw"), np.full((4, 1000), value))
+            for name, value in (("rep_no_before", 1.3), ("rep_no_after", 1.0))
+        }
+    )
+    result = risk.compute_risk(
+        model_name="poisson",
+        reported_incidence_vec=np.array([1]),
+        switch_day=0,
+        delay_distributions={
+            "serial_interval": DelayDistribution(prob=np.array([1.0]), first_lag=1)
+        },
+        trace=types.SimpleNamespace(posterior=posterior),
+    )
+    assert result["risk"] == pytest.approx(-np.expm1(-1.3))
+    assert result["risk_mcse"] == 0.0
+    assert np.isnan(result["risk_rhat"])
 
 
 @pytest.mark.parametrize("reporting_prob", [1.0, 0.5])
@@ -321,15 +376,16 @@ def test_dlo_sustained_and_reports_raise(*, risk_type, risk_inputs):
 
 @pytest.mark.parametrize(("model_name", "risk_type"), _MODEL_AND_RISK_TYPES)
 def test_zero_incidence_has_zero_risk(*, model_name, risk_type, risk_inputs):
+    # Enough draws for arviz's diagnostics, which are NaN with fewer than 4 per chain
     posterior = xr.Dataset(
         {
-            name: (("chain", "draw"), np.ones((2, 3)))
+            name: (("chain", "draw"), np.ones((2, 10)))
             for name in ("rep_no_before", "rep_no_after", "dispersion")
         }
         | {
             name: (
                 ("chain", "draw", "day"),
-                np.zeros((2, 3, len(risk_inputs["reported_incidence_vec"]))),
+                np.zeros((2, 10, len(risk_inputs["reported_incidence_vec"]))),
             )
             for name in ("cohort_inf", "total_inf")
         }
@@ -347,7 +403,10 @@ def test_zero_incidence_has_zero_risk(*, model_name, risk_type, risk_inputs):
         trace=types.SimpleNamespace(posterior=posterior),
         risk_type=risk_type,
     )
-    assert result == 0.0
+    # Every sample is zero, so has no Monte Carlo error, and no R-hat
+    assert result["risk"] == 0.0
+    assert result["risk_mcse"] == 0.0
+    assert np.isnan(result["risk_rhat"])
 
 
 @pytest.mark.parametrize("model_name", ["poisson_so", "sse_so", "ssi_so"])
@@ -390,7 +449,7 @@ def test_so_risk_with_only_lag_zero_tost(*, model_name, risk_type):
         trace=types.SimpleNamespace(posterior=posterior),
         risk_type=risk_type,
     )
-    assert result == pytest.approx(expected, rel=1e-10, abs=0)
+    assert result["risk"] == pytest.approx(expected, rel=1e-10, abs=0)
 
 
 @pytest.mark.parametrize("first_lag", [0, 1, 5])

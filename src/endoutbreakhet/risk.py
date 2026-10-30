@@ -1,3 +1,4 @@
+import arviz_stats
 import numpy as np
 from scipy.optimize.elementwise import find_root
 
@@ -23,7 +24,9 @@ def compute_risk(
     # "sustained" (RST: transmission that never dies out) or "reports" (RAR: a reported
     # case), if interventions are lifted from the start of the next day (so R^(fut) =
     # rep_no_before on every later day). Each risk conditions on parameters and total
-    # incidence (and infectiousness latents, where present), as in the notes.
+    # incidence (and infectiousness latents, where present), as in the notes. Returned as
+    # risk, with the Monte Carlo standard error of the mean (risk_mcse, zero if every sample
+    # is the same) and the rank-normalised R-hat of the samples (risk_rhat, NaN if so).
     # reporting_prob must be the one the trace was fitted with: the trace only shows
     # whether reporting was complete
     risk_samples_funcs = {
@@ -72,7 +75,19 @@ def compute_risk(
         risk_type=risk_type,
         reporting_prob=reporting_prob,
     )
-    return float(np.mean(risk_samples))
+    # By chain, as _posterior_samples flattens them chain-major. Samples that are all the
+    # same are caught here, as arviz's MCSE of them can be rounding error rather than zero
+    risk_samples = risk_samples.reshape(posterior.sizes["chain"], -1)
+    if np.all(risk_samples == risk_samples.flat[0]):
+        risk_mcse, risk_rhat = 0.0, np.nan
+    else:
+        risk_mcse = float(arviz_stats.mcse(risk_samples, method="mean"))
+        risk_rhat = float(arviz_stats.rhat(risk_samples))
+    return {
+        "risk": float(np.mean(risk_samples)),
+        "risk_mcse": risk_mcse,
+        "risk_rhat": risk_rhat,
+    }
 
 
 def _poisson_risk_samples(

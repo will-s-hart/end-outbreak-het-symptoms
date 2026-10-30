@@ -57,6 +57,22 @@ FIT_KWARGS = {
     "target_accept": 0.9,
 }
 N_EVIDENCE_PROPOSAL_SAMPLES = 10_000
+# Applied to the saved diagnostics by fit_diagnostics_plots only, so editing one never reruns
+# a fit
+FIT_GATE_THRESHOLDS = {
+    "max_rhat": 1.01,
+    # Over all chains, not per chain
+    "min_ess_bulk": 400,
+    "min_ess_tail": 400,
+    # Any divergence means exploration may be biased, so loosen this only for rare
+    # divergences whose cause is understood, recording it here
+    "max_n_divergences": 0,
+    # Absolute: one percentage point
+    "max_risk_mcse": 0.01,
+    # Bounds the standard error of every posterior model probability by half this, to first
+    # order, whatever the comparison
+    "max_log_evidence_se": 0.1,
+}
 FIG_EXTENSIONS = ("svg", "png")
 DATA_PATH = pathlib.Path("data/equateur_2018_onsets.csv")
 
@@ -169,7 +185,9 @@ def get_inputs_model_fits(*, model_spec_name):
         "reporting_prob": model_spec["reporting_prob"],
         "fit_kwargs": FIT_KWARGS,
         "n_evidence_proposal_samples": N_EVIDENCE_PROPOSAL_SAMPLES,
-        "rng": np.random.default_rng(seed=42),
+        # A stream of its own for each spec (keyed by name, so reordering the specs changes
+        # nothing), so specs' log evidence errors are independent
+        "rng": np.random.default_rng(seed=[42, *model_spec_name.encode()]),
         "results_paths": get_results_paths_model_fits(model_spec_name=model_spec_name),
     }
 
@@ -225,6 +243,33 @@ def get_inputs_model_comparison_plots(*, comparison_spec_name):
     }
 
 
+def get_inputs_fit_diagnostics_plots():
+    return {
+        **_get_shared_inputs(),
+        "results_paths_by_spec": {
+            model_spec_name: get_results_paths_model_fits(
+                model_spec_name=model_spec_name
+            )
+            for model_spec_name in MODEL_SPECS
+        },
+        "reporting_prob_by_spec": {
+            model_spec_name: model_spec["reporting_prob"]
+            for model_spec_name, model_spec in MODEL_SPECS.items()
+        },
+        # Constant by construction, so left out of the gate
+        "fixed_param_names_by_spec": {
+            model_spec_name: [
+                param_name
+                for param_name, prior in model_spec["priors"].items()
+                if prior.get("dist") == "fixed"
+            ]
+            for model_spec_name, model_spec in MODEL_SPECS.items()
+        },
+        "thresholds": FIT_GATE_THRESHOLDS,
+        "fig_paths": get_fig_paths_fit_diagnostics_plots(),
+    }
+
+
 def get_results_paths_delay_distributions():
     results_dir = pathlib.Path("results/delay_distributions")
     return {
@@ -237,6 +282,7 @@ def get_results_paths_model_fits(*, model_spec_name):
     results_dir = pathlib.Path("results/model_fits") / model_spec_name
     return {
         "risk": results_dir / "risk.csv",
+        "diagnostics": results_dir / "diagnostics.csv",
         "evidence": results_dir / "evidence.csv",
         "posterior": results_dir / "posterior.csv",
         "trace": results_dir / "trace.nc",
@@ -268,6 +314,12 @@ def get_fig_paths_model_comparison_plots(*, comparison_spec_name):
         fig_name: [fig_dir / f"{fig_name}.{ext}" for ext in FIG_EXTENSIONS]
         for fig_name in fig_names
     }
+
+
+def get_fig_paths_fit_diagnostics_plots():
+    # One path per file format for the figure
+    fig_dir = pathlib.Path("figures/fit_diagnostics")
+    return {"gate": [fig_dir / f"gate.{ext}" for ext in FIG_EXTENSIONS]}
 
 
 def _get_shared_inputs():

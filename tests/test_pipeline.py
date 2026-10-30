@@ -70,7 +70,11 @@ def test_fits_data_through_each_day(
 
     def _fake_risk(*, trace, risk_type, reporting_prob, **kwargs):
         risk_calls.append({"risk_type": risk_type, "reporting_prob": reporting_prob})
-        return trace.n_days + risk_offsets[risk_type]
+        risk = trace.n_days + risk_offsets[risk_type]
+        return {"risk": risk, "risk_mcse": risk / 100, "risk_rhat": 1 + risk / 1000}
+
+    def _fake_fit_diagnostics(*, trace):
+        return {"n_divergences": trace.n_days, "max_rhat_rep_no_before": 1.0}
 
     def _fake_log_evidence(*, trace, reporting_prob, **kwargs):
         evidence_calls.append({"trace": trace, "reporting_prob": reporting_prob})
@@ -78,6 +82,7 @@ def test_fits_data_through_each_day(
 
     monkeypatch.setattr(pipeline, "fit_model", _paddle_out)
     monkeypatch.setattr(pipeline, "compute_risk", _fake_risk)
+    monkeypatch.setattr(pipeline, "compute_fit_diagnostics", _fake_fit_diagnostics)
     monkeypatch.setattr(pipeline, "compute_log_evidence", _fake_log_evidence)
     outputs = pipeline.run_pipeline(
         **(pipeline_inputs | {"model_name": model_name}), reporting_prob=0.7, n_jobs=1
@@ -99,17 +104,37 @@ def test_fits_data_through_each_day(
     # Each day rides its own stream of random numbers
     assert len({fit["rng"].random() for fit in fits}) == len(days)
 
+    # Each risk with its Monte Carlo standard error and R-hat beside it
+    risk_vecs = {
+        risk_type: np.array(days) + 1 + risk_offsets[risk_type]
+        for risk_type in risk_types
+    }
     pd.testing.assert_frame_equal(
         outputs["risk_df"],
         pd.DataFrame(
             {
                 "day": days,
                 **{
-                    f"risk_{risk_type}": [
-                        day + 1 + risk_offsets[risk_type] for day in days
+                    column: values
+                    for risk_type, risk_vec in risk_vecs.items()
+                    for column, values in [
+                        (f"risk_{risk_type}", risk_vec),
+                        (f"risk_mcse_{risk_type}", risk_vec / 100),
+                        (f"risk_rhat_{risk_type}", 1 + risk_vec / 1000),
                     ]
-                    for risk_type in risk_types
                 },
+            }
+        ),
+        check_dtype=False,
+    )
+    # And every day's fit diagnostics
+    pd.testing.assert_frame_equal(
+        outputs["diagnostics_df"],
+        pd.DataFrame(
+            {
+                "day": days,
+                "n_divergences": [day + 1 for day in days],
+                "max_rhat_rep_no_before": 1.0,
             }
         ),
         check_dtype=False,
@@ -138,14 +163,28 @@ def test_parallel_matches_serial(*, pipeline_inputs):
     pd.testing.assert_frame_equal(
         outputs_serial["risk_df"], outputs_parallel["risk_df"]
     )
+    pd.testing.assert_frame_equal(
+        outputs_serial["diagnostics_df"], outputs_parallel["diagnostics_df"]
+    )
     assert outputs_serial["evidence"] == outputs_parallel["evidence"]
     xr.testing.assert_equal(
         outputs_serial["trace"].posterior.to_dataset(),
         outputs_parallel["trace"].posterior.to_dataset(),
     )
-    risks = outputs_serial["risk_df"].drop(columns="day").to_numpy()
-    assert risks.shape[1] == 4
+    risk_types = ["cases", "transmission", "sustained", "reports"]
+    assert list(outputs_serial["risk_df"].columns) == [
+        "day",
+        *(
+            f"{name}_{risk_type}"
+            for risk_type in risk_types
+            for name in ("risk", "risk_mcse", "risk_rhat")
+        ),
+    ]
+    risks = outputs_serial["risk_df"][
+        [f"risk_{risk_type}" for risk_type in risk_types]
+    ].to_numpy()
     assert np.all((risks >= 0) & (risks <= 1))
+    assert list(outputs_serial["diagnostics_df"]["day"]) == [10, 13, 16, 19]
 
 
 def test_parallel_maps_isolate_real_numba_caches(*, tmp_path, monkeypatch):

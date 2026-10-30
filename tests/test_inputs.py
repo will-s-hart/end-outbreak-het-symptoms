@@ -8,9 +8,11 @@ from endoutbreakhet.inference import _build_pymc_model
 from scripts.inputs import (
     COMPARISON_SPECS,
     FIG_EXTENSIONS,
+    FIT_GATE_THRESHOLDS,
     MODEL_SPECS,
     get_inputs_delay_distributions,
     get_inputs_delay_distributions_plots,
+    get_inputs_fit_diagnostics_plots,
     get_inputs_model_comparison_plots,
     get_inputs_model_fits,
     get_results_paths_delay_distributions,
@@ -139,6 +141,59 @@ def test_get_inputs_model_fits_reads_delay_distributions_results(*, monkeypatch)
         inputs["delay_distributions_results_paths"]
         == get_results_paths_delay_distributions()
     )
+
+
+def test_get_inputs_fit_diagnostics_plots(*, monkeypatch):
+    # Only the paths and values are checked, so skip loading the data
+    monkeypatch.setattr(scripts.inputs, "_get_shared_inputs", dict)
+    inputs = get_inputs_fit_diagnostics_plots()
+
+    # Reads every spec's results where the fits write them
+    assert inputs["results_paths_by_spec"] == {
+        model_spec_name: get_inputs_model_fits(model_spec_name=model_spec_name)[
+            "results_paths"
+        ]
+        for model_spec_name in MODEL_SPECS
+    }
+    assert inputs["reporting_prob_by_spec"] == {
+        model_spec_name: model_spec["reporting_prob"]
+        for model_spec_name, model_spec in MODEL_SPECS.items()
+    }
+    # Fixed parameters, which the gate leaves out
+    assert inputs["fixed_param_names_by_spec"]["sse_fixed_dispersion"] == ["dispersion"]
+    assert inputs["fixed_param_names_by_spec"]["sse_estimated_dispersion"] == []
+    assert inputs["fixed_param_names_by_spec"].keys() == MODEL_SPECS.keys()
+    assert inputs["thresholds"] == FIT_GATE_THRESHOLDS
+
+    fig_paths = inputs["fig_paths"]
+    assert list(fig_paths) == ["gate"]
+    assert [path.suffix for path in fig_paths["gate"]] == [
+        f".{ext}" for ext in FIG_EXTENSIONS
+    ]
+    for path in fig_paths["gate"]:
+        assert path.parent == pathlib.Path("figures/fit_diagnostics")
+        assert path.stem == "gate"
+
+
+def test_model_fits_rngs_distinct_per_spec_and_independent_of_order(*, monkeypatch):
+    # Each spec has a stream of its own (so specs' log evidence errors are independent),
+    # keyed by its name rather than its place among the specs
+    monkeypatch.setattr(scripts.inputs, "_get_shared_inputs", dict)
+
+    def _first_draws():
+        return {
+            model_spec_name: get_inputs_model_fits(model_spec_name=model_spec_name)[
+                "rng"
+            ].random()
+            for model_spec_name in MODEL_SPECS
+        }
+
+    first_draws = _first_draws()
+    assert len(set(first_draws.values())) == len(MODEL_SPECS)
+    monkeypatch.setattr(
+        scripts.inputs, "MODEL_SPECS", dict(reversed(MODEL_SPECS.items()))
+    )
+    assert _first_draws() == first_draws
 
 
 def test_model_fits_params_distinct_per_spec_and_stable():

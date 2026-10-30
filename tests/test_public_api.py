@@ -6,6 +6,7 @@ def test_public_api():
     assert set(endoutbreakhet.__all__) == {
         "DELAY_FIRST_LAGS",
         "DelayDistribution",
+        "compute_fit_diagnostics",
         "compute_log_evidence",
         "compute_model_probabilities",
         "compute_risk",

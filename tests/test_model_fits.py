@@ -4,12 +4,14 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from endoutbreakhet import DELAY_FIRST_LAGS, DelayDistribution
+from endoutbreakhet import DELAY_FIRST_LAGS, DelayDistribution, compute_fit_diagnostics
 from scripts import model_fits
 from scripts.inputs import MODEL_SPECS, get_inputs_model_fits
 
 
-def test_run_analyses_passes_delays_and_reporting_prob(*, tmp_path, monkeypatch):
+def test_run_analyses_passes_delays_and_reporting_prob_and_writes_diagnostics(
+    *, tmp_path, monkeypatch
+):
     # Real inputs, with toy delay distributions and the results redirected into tmp_path
     model_spec_name = "sse_60_pc_reporting"
     inputs = get_inputs_model_fits(model_spec_name=model_spec_name)
@@ -38,12 +40,40 @@ def test_run_analyses_passes_delays_and_reporting_prob(*, tmp_path, monkeypatch)
         model_fits, "get_inputs_model_fits", lambda *, model_spec_name: inputs
     )
     pipeline_kwargs = {}
+    # Diagnostics of two days' fits, with a latent constant on the first (so its stats are
+    # NaN) but not the second, and divergences counted on the second only
+    diagnostics_df = pd.DataFrame(
+        [
+            {"day": day}
+            | compute_fit_diagnostics(
+                trace=xr.DataTree.from_dict(
+                    {
+                        "posterior": xr.Dataset(
+                            {
+                                "rep_no_before": (
+                                    ("chain", "draw"),
+                                    rng.normal(size=(2, 50)),
+                                ),
+                                "u": (("chain", "draw", "latent_day"), u_values),
+                            }
+                        ),
+                        "sample_stats": xr.Dataset(attrs=sample_stats_attrs),
+                    }
+                )
+            )
+            for day, u_values, sample_stats_attrs in [
+                (0, np.ones((2, 50, 3)), {}),
+                (1, rng.uniform(size=(2, 50, 3)), {"n_divergences": 2}),
+            ]
+        ]
+    )
 
     def _run_pipeline(**kwargs):
         pipeline_kwargs.update(kwargs)
         posterior = xr.Dataset({"rep_no_before": (("chain", "draw"), np.ones((1, 2)))})
         return {
             "risk_df": pd.DataFrame({"day": [0]}),
+            "diagnostics_df": diagnostics_df,
             "evidence": {"log_evidence": 0.0},
             "trace": xr.DataTree.from_dict({"posterior": posterior}),
         }
@@ -61,6 +91,13 @@ def test_run_analyses_passes_delays_and_reporting_prob(*, tmp_path, monkeypatch)
     assert (
         pipeline_kwargs["reporting_prob"]
         == MODEL_SPECS[model_spec_name]["reporting_prob"]
+    )
+    # The diagnostics come back from their CSV as they went in
+    assert diagnostics_df["min_ess_bulk_u"].isna().tolist() == [True, False]
+    pd.testing.assert_frame_equal(
+        pd.read_csv(inputs["results_paths"]["diagnostics"]),
+        diagnostics_df,
+        check_dtype=False,
     )
 
 

@@ -11,6 +11,7 @@ from endoutbreakhet.plotting import (
     _month_start_x_axis,
     plot_delay_distribution,
     plot_densities,
+    plot_fit_gate,
     plot_model_probabilities,
     plot_risk_incidence_overlay,
     save_figure,
@@ -141,6 +142,72 @@ def test_plot_model_probabilities():
     assert [text.get_text() for text in ax.get_legend().get_texts()] == [
         "SSE (0.25)",
         "SSI-SO (0.75)",
+    ]
+
+
+def test_plot_fit_gate():
+    # Two specs over three days, with the second spec's fit failing on day 11
+    statuses = np.array([["pass", "pass", "unassessed"], ["pass", "fail", "pass"]])
+    criteria = ("rhat", "ess_bulk", "ess_tail", "divergences", "risk")
+    fig = plot_fit_gate(
+        status_by_criterion=dict.fromkeys(criteria, statuses),
+        fit_status=np.array([["pass", "pass", "pass"], ["pass", "fail", "pass"]]),
+        evidence_status=["pass", "fail"],
+        spec_names=["sse", "ssi"],
+        days=np.array([10, 11, 12]),
+        comparison_day=11,
+    )
+    *criterion_axes, evidence_ax = fig.axes
+    colors = {"pass": "tab:green", "fail": "tab:red", "unassessed": "lightgray"}
+
+    def _cell_colors(*, ax):
+        (image,) = ax.get_images()
+        return image.to_rgba(image.get_array())
+
+    def _expected_colors(*, statuses):
+        return np.array(
+            [
+                [matplotlib.colors.to_rgba(colors[status]) for status in row]
+                for row in statuses
+            ]
+        )
+
+    assert [ax.get_title() for ax in criterion_axes] == [
+        r"$\hat{R}$",
+        "Bulk ESS",
+        "Tail ESS",
+        "Divergences",
+        "Risk",
+    ]
+    for ax in criterion_axes:
+        np.testing.assert_allclose(
+            _cell_colors(ax=ax), _expected_colors(statuses=statuses)
+        )
+        # Days on x, specs on y
+        assert ax.get_xlim() == (9.5, 12.5)
+        assert ax.get_ylim() == (1.5, -0.5)
+        (comparison_line,) = ax.get_lines()
+        assert list(comparison_line.get_xdata()) == [11, 11]
+    assert [label.get_text() for label in criterion_axes[0].get_yticklabels()] == [
+        "sse",
+        "ssi",
+    ]
+    # Only the risk cell on the failed fit is hatched
+    for ax in criterion_axes[:-1]:
+        assert not ax.patches
+    (hatched,) = criterion_axes[-1].patches
+    assert hatched.get_hatch() == "////"
+    assert hatched.get_xy() == (10.5, 0.5)
+    np.testing.assert_allclose(
+        _cell_colors(ax=evidence_ax),
+        _expected_colors(statuses=[["pass"], ["fail"]]),
+    )
+    assert [label.get_text() for label in evidence_ax.get_xticklabels()] == ["Evidence"]
+    assert [text.get_text() for text in fig.legends[0].get_texts()] == [
+        "pass",
+        "fail",
+        "unassessed",
+        "risk given a failed fit",
     ]
 
 

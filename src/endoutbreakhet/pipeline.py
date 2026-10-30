@@ -12,7 +12,7 @@ from joblib import Parallel, delayed, parallel_config
 from tqdm import tqdm
 
 from endoutbreakhet.evidence import compute_log_evidence
-from endoutbreakhet.inference import fit_model
+from endoutbreakhet.inference import compute_fit_diagnostics, fit_model
 from endoutbreakhet.risk import compute_risk
 from endoutbreakhet.utils import validate_delay_distributions
 
@@ -33,10 +33,11 @@ def run_pipeline(
     n_jobs=-1,
 ):
     # Fits the model to the onsets up to and including each day in risk_days and
-    # comparison_day (taking onsets after the end of reported_incidence_vec to be zero), and
-    # computes every risk the model has after that day (DLO risks of sustained transmission
-    # and reports aren't implemented). The trace and log evidence are kept for
-    # comparison_day only, where specs are compared
+    # comparison_day (taking onsets after the end of reported_incidence_vec to be zero),
+    # computing the fit's diagnostics and every risk the model has after that day (DLO risks
+    # of sustained transmission and reports aren't implemented), each with its Monte Carlo
+    # standard error and R-hat. The trace and log evidence are kept for comparison_day only,
+    # where specs are compared
     validate_delay_distributions(
         model_name=model_name, delay_distributions=delay_distributions
     )
@@ -77,18 +78,25 @@ def run_pipeline(
     comparison_output = day_outputs[np.searchsorted(days, comparison_day)]
 
     risk_df = pd.DataFrame(
-        {
-            "day": days,
-            **{
-                f"risk_{risk_type}": [
-                    output[f"risk_{risk_type}"] for output in day_outputs
-                ]
-                for risk_type in risk_types
-            },
-        }
+        [
+            {"day": day}
+            | {
+                f"{name}_{risk_type}": value
+                for risk_type, risk in output["risk_by_type"].items()
+                for name, value in risk.items()
+            }
+            for day, output in zip(days, day_outputs, strict=True)
+        ]
+    )
+    diagnostics_df = pd.DataFrame(
+        [
+            {"day": day} | output["diagnostics"]
+            for day, output in zip(days, day_outputs, strict=True)
+        ]
     )
     return {
         "risk_df": risk_df,
+        "diagnostics_df": diagnostics_df,
         "trace": comparison_output["trace"],
         "evidence": comparison_output["evidence"],
     }
@@ -119,16 +127,19 @@ def _analyse_day(
         **fit_kwargs,
     )
     output = {
-        f"risk_{risk_type}": compute_risk(
-            model_name=model_name,
-            reported_incidence_vec=reported_incidence_vec,
-            switch_day=switch_day,
-            delay_distributions=delay_distributions,
-            trace=trace,
-            reporting_prob=reporting_prob,
-            risk_type=risk_type,
-        )
-        for risk_type in risk_types
+        "diagnostics": compute_fit_diagnostics(trace=trace),
+        "risk_by_type": {
+            risk_type: compute_risk(
+                model_name=model_name,
+                reported_incidence_vec=reported_incidence_vec,
+                switch_day=switch_day,
+                delay_distributions=delay_distributions,
+                trace=trace,
+                reporting_prob=reporting_prob,
+                risk_type=risk_type,
+            )
+            for risk_type in risk_types
+        },
     }
     if not keep_trace_and_evidence:
         return output | {"trace": None, "evidence": None}
