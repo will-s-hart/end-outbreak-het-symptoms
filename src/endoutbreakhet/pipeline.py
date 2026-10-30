@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pytensor
 from joblib import Parallel, delayed, parallel_config
+from pytensor.link.numba import cache as pytensor_numba_cache
 from tqdm import tqdm
 
 from endoutbreakhet.evidence import compute_log_evidence
@@ -189,15 +190,19 @@ def _parallel_map(*, func, kwargs_list, n_jobs, desc):
 
 @contextlib.contextmanager
 def _base_compiledir_for_new_workers(*, base_compiledir):
-    # PyTensor's Numba linker caches compiled ops under `config.base_compiledir/numba`, shared
-    # by every process with that base. On a cluster network filesystem, a worker reading a
-    # cache index that a worker on another node is replacing fails with ESTALE. The base is
-    # fixed when PyTensor is imported, which in a worker comes before any initializer runs
-    # (unpickling one imports this package), so it's passed in PYTENSOR_FLAGS, which workers
-    # inherit when spawned. PYTENSOR_FLAGS overrides .pytensorrc and its later flags override
-    # earlier ones, so this overrides the base however the caller set it, keeping other flags
-    # PyTensor splits the flags with a POSIX shlex, so the path is single-quoted (closing and
-    # reopening the quotes around any quote in it) to keep backslashes, commas and #s
+    # PyTensor's caches default to dirs under `config.base_compiledir`, its Numba linker's
+    # (created on import) to `base_compiledir/numba`. Each worker moves its caches to dirs of
+    # its own (see _prepare_worker), but only once PyTensor is imported, so as a safeguard
+    # workers get the map's base too, keeping anything cached by default out of the
+    # caller's. That may be on
+    # a cluster network filesystem, where a worker reading a cache index that a worker on
+    # another node is replacing fails with ESTALE. The base is fixed when PyTensor is
+    # imported, which in a worker comes before any initializer runs (unpickling one imports
+    # this package), so it's passed in PYTENSOR_FLAGS, which workers inherit when spawned.
+    # PYTENSOR_FLAGS overrides .pytensorrc and its later flags override earlier ones, so this
+    # overrides the base however the caller set it, keeping other flags. PyTensor splits the
+    # flags with a POSIX shlex, so the path is single-quoted (closing and reopening the
+    # quotes around any quote in it) to keep backslashes, commas and #s
     flags = os.environ.get("PYTENSOR_FLAGS")
     quoted_base_compiledir = "'" + str(base_compiledir).replace("'", "'\"'\"'") + "'"
     os.environ["PYTENSOR_FLAGS"] = ",".join(
@@ -213,12 +218,21 @@ def _base_compiledir_for_new_workers(*, base_compiledir):
 
 
 def _prepare_worker(*, base_compiledir):
-    # Isolate this worker's PyTensor compile dir within the map's base: the compile FileLock
+    # Give this worker PyTensor caches of its own within the map's base. The compile FileLock
     # is taken on `config.compiledir/.lock` (read dynamically per compilation), so sharing
-    # one dir across workers would serialise the C-compilation phase and defeat the
-    # parallelism. Quieten PyMC's per-fit INFO logging, which would otherwise be repeated for
-    # every task
-    worker_compiledir = pathlib.Path(base_compiledir) / f"worker_{os.getpid()}"
-    worker_compiledir.mkdir()
-    pytensor.config.compiledir = worker_compiledir
+    # one compile dir across workers would serialise the C-compilation phase and defeat the
+    # parallelism. Numba saves a function's cache index by an unlocked read-modify-write
+    # (numba#10862), so workers saving different signatures of one op at once (e.g. Alloc
+    # with int8 and int16 shapes) can leave one signature's entry pointing at the other's
+    # compiled code, which a later compile loads and fails to type. PyTensor's cache locator
+    # hands NUMBA_CACHE_PATH to each cached function as it's jitted, so this precedes any
+    # compilation, and never creates it. It sits beside the compile dir, as PyTensor removes
+    # empty dirs within that. The worker's dir is made unique by mkdtemp, not named by pid,
+    # since loky replaces workers mid-map (e.g. on memory growth) and a pid can recur.
+    # Quieten PyMC's per-fit INFO logging, which would otherwise be repeated for every task
+    worker_dir = pathlib.Path(tempfile.mkdtemp(prefix="worker_", dir=base_compiledir))
+    (worker_dir / "compiledir").mkdir()
+    (worker_dir / "numba").mkdir()
+    pytensor.config.compiledir = worker_dir / "compiledir"
+    pytensor_numba_cache.NUMBA_CACHE_PATH = worker_dir / "numba"
     logging.getLogger("pymc").setLevel(logging.WARNING)

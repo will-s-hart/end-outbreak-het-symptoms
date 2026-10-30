@@ -188,9 +188,11 @@ def test_parallel_matches_serial(*, pipeline_inputs):
 
 
 def test_parallel_maps_isolate_real_numba_caches(*, tmp_path, monkeypatch):
-    # Workers mustn't share a Numba cache with the caller or other runs: on a cluster network
-    # filesystem, reading a cache index that another node is replacing fails with ESTALE. The
-    # caller's base is set in a .pytensorrc, as on the cluster
+    # Workers mustn't share a Numba cache with the caller, other runs or each other: on a
+    # cluster network filesystem, reading a cache index that another node is replacing fails
+    # with ESTALE, and on any filesystem, workers saving different signatures of one op at
+    # once can leave one's entry pointing at the other's code. The caller's base is set in a
+    # .pytensorrc, as on the cluster
     rc_base_compiledir = tmp_path / "rc_base_compiledir"
     rc_path = tmp_path / "pytensorrc"
     rc_path.write_text(f"[global]\nbase_compiledir = {rc_base_compiledir}\n")
@@ -214,6 +216,9 @@ def test_parallel_maps_isolate_real_numba_caches(*, tmp_path, monkeypatch):
             "compiledir": pytensor.config.compiledir,
             "numba_cache_path": cache.NUMBA_CACHE_PATH,
             "has_cache_files": any(cache.NUMBA_CACHE_PATH.glob("*.nbi")),
+            "has_base_cache_files": any(
+                (pytensor.config.base_compiledir / "numba").glob("*.nbi")
+            ),
             "exception_verbosity": pytensor.config.exception_verbosity,
         }
 
@@ -238,13 +243,16 @@ def test_parallel_maps_isolate_real_numba_caches(*, tmp_path, monkeypatch):
         assert len({cache["pid"] for cache in caches}) == 2
         assert base_compiledir != pytensor.config.base_compiledir
         assert not base_compiledir.exists()
+        # Each worker caches in a dir of its own within the base, leaving the base's default
+        # unused
+        assert len({cache["numba_cache_path"].parent for cache in caches}) == 2
         for cache in caches:
-            assert cache["numba_cache_path"] == base_compiledir / "numba"
+            worker_dir = cache["numba_cache_path"].parent
+            assert worker_dir.parent == base_compiledir
             assert cache["has_cache_files"]
+            assert not cache["has_base_cache_files"]
             # PyTensor resolves the compile dir
-            assert cache["compiledir"] == (
-                base_compiledir.resolve() / f"worker_{cache['pid']}"
-            )
+            assert cache["compiledir"] == worker_dir.resolve() / "compiledir"
             # The caller's other flags reach the workers
             assert cache["exception_verbosity"] == "high"
     assert not rc_base_compiledir.exists()
