@@ -63,19 +63,22 @@ def run_pipeline(
         fit_kwargs=fit_kwargs | {"cores": 1, "progressbar": False},
         n_evidence_proposal_samples=n_evidence_proposal_samples,
     )
+    kwargs_list = [
+        {
+            "reported_incidence_vec": reported_incidence_vec[: day + 1],
+            "rng": day_rng,
+            "keep_trace_and_evidence": day == comparison_day,
+        }
+        for day, day_rng in zip(days, rng.spawn(len(days)), strict=True)
+    ]
+    # Dispatched latest day first, as fits to more days take longer: dispatched last, the
+    # longest would run on after the other workers had finished
     day_outputs = _parallel_map(
         func=analyse_day,
-        kwargs_list=[
-            {
-                "reported_incidence_vec": reported_incidence_vec[: day + 1],
-                "rng": day_rng,
-                "keep_trace_and_evidence": day == comparison_day,
-            }
-            for day, day_rng in zip(days, rng.spawn(len(days)), strict=True)
-        ],
+        kwargs_list=kwargs_list[::-1],
         n_jobs=n_jobs,
         desc="Fitting model to data available up to each day",
-    )
+    )[::-1]
     comparison_output = day_outputs[np.searchsorted(days, comparison_day)]
 
     risk_df = pd.DataFrame(

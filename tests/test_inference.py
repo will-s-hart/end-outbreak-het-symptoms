@@ -4,6 +4,8 @@ import itertools
 import arviz_stats
 import numpy as np
 import pymc as pm
+import pytensor
+import pytensor.tensor as pt
 import pytest
 import scipy.special
 import scipy.stats
@@ -13,6 +15,7 @@ from endoutbreakhet import DelayDistribution
 from endoutbreakhet.inference import (
     _build_pymc_model,
     _dispersed_starts,
+    _gammaincinv,
     compute_fit_diagnostics,
     fit_model,
 )
@@ -235,15 +238,31 @@ def test_unreported_case_without_force_impossible(
 
 def test_under_reporting_gradient_finite(*, model_name, toy_inputs_under_reporting):
     # Days with zero force of infection/disease, and gamma latents with zero mean (the last
-    # days, at the initial point), must not give NaN gradients. The gamma latents have no
-    # gradient with respect to their shape, so the dispersion is left out in models with
-    # them
+    # days, at the initial point), must not give NaN gradients, the dispersion's included
     model = _build_pymc_model(model_name=model_name, **toy_inputs_under_reporting)
-    excluded_names = {"unreported_incidence"}
-    if model_name in _N_LATENTS:
-        excluded_names |= {"dispersion"}
-    rvs = [rv for rv in model.free_RVs if rv.name not in excluded_names]
+    rvs = [rv for rv in model.free_RVs if rv.name != "unreported_incidence"]
     assert np.all(np.isfinite(model.compile_dlogp(vars=rvs)(model.initial_point())))
+
+
+@pytest.mark.parametrize("reporting_prob", [1.0, 0.5])
+def test_nuts_samples_every_continuous_variable(
+    *, model_name, reporting_prob, toy_inputs
+):
+    # Every continuous variable has a gradient (the gamma latents have one in their shape),
+    # so pm.sample gives NUTS all of them, and Metropolis any unreported cases
+    model = _build_pymc_model(
+        model_name=model_name, **toy_inputs, reporting_prob=reporting_prob
+    )
+    with model:
+        _, selected_steps = pm.sampling.mcmc.assign_step_methods(model)
+    expected_steps = {pm.NUTS: set(model.continuous_value_vars)}
+    if reporting_prob < 1:
+        expected_steps[pm.Metropolis] = {
+            model.rvs_to_values[model["unreported_incidence"]]
+        }
+    assert {
+        method: set(value_vars) for method, value_vars in selected_steps.items()
+    } == expected_steps
 
 
 @pytest.mark.parametrize("reporting_prob", [1.0, 0.5])
@@ -310,6 +329,58 @@ def test_gamma_via_uniform(*, reporting_prob, toy_inputs):
     np.testing.assert_allclose(cohort_inf_vec.eval(values), expected, rtol=1e-8)
 
 
+def test_gammaincinv_gradients():
+    # The inverse of the regularised lower incomplete gamma function, as scipy's, with
+    # gradients in the probability (the reciprocal of the gamma density) and in the shape,
+    # where it's a normal float. The latter is checked against Richardson-extrapolated central
+    # differences of its log in the log shape, to the accuracy of PyTensor's gradient of P.
+    # Both are zero where it underflows
+    k_vec, x_vec = (
+        values.ravel()
+        for values in np.meshgrid(
+            np.geomspace(0.01, 100, 15),
+            np.concatenate(
+                [np.geomspace(1e-8, 0.5, 8), 1 - np.geomspace(1e-8, 0.5, 8)[::-1]]
+            ),
+        )
+    )
+    k, x = pt.dvectors("k", "x")
+    z = _gammaincinv(k, x)
+    assert isinstance(z, pt.TensorVariable)
+    dz_dk = pytensor.grad(z.sum(), wrt=k)
+    dz_dx = pytensor.grad(z.sum(), wrt=x)
+    assert isinstance(dz_dk, pt.TensorVariable) and isinstance(dz_dx, pt.TensorVariable)
+    z_vec, dz_dk_vec, dz_dx_vec = pytensor.function([k, x], [z, dz_dk, dz_dx])(
+        k_vec, x_vec
+    )
+
+    np.testing.assert_array_equal(z_vec, scipy.special.gammaincinv(k_vec, x_vec))
+    normal_idx = z_vec >= np.finfo(float).tiny
+    np.testing.assert_allclose(
+        dz_dx_vec[normal_idx],
+        1 / scipy.stats.gamma.pdf(z_vec, a=k_vec)[normal_idx],
+        rtol=1e-12,
+    )
+
+    def _dlogz_dlogk(*, step):
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return (
+                np.log(scipy.special.gammaincinv(k_vec * np.exp(step), x_vec))
+                - np.log(scipy.special.gammaincinv(k_vec * np.exp(-step), x_vec))
+            ) / (2 * step)
+
+    dlogz_dlogk_vec = (4 * _dlogz_dlogk(step=1e-3) - _dlogz_dlogk(step=2e-3)) / 3
+    np.testing.assert_allclose(
+        dz_dk_vec[normal_idx],
+        (dlogz_dlogk_vec * z_vec / k_vec)[normal_idx],
+        rtol=1e-4,
+    )
+    underflow_idx = z_vec == 0
+    assert np.any(underflow_idx)
+    np.testing.assert_array_equal(dz_dk_vec[underflow_idx], 0)
+    np.testing.assert_array_equal(dz_dx_vec[underflow_idx], 0)
+
+
 def _slice_and_untuned_metropolis():
     # Explicit steps: slice sampling for the continuous variables, and Metropolis without
     # tuning (so its scaling stays at 1) for the unreported cases
@@ -324,6 +395,7 @@ def _slice_and_untuned_metropolis():
     ("model_name", "step", "reporting_prob"),
     [
         ("poisson", None, 1.0),
+        ("ssi", None, 1.0),
         ("ssi", pm.Slice, 1.0),
         # Metropolis steps for the unreported cases, with NUTS or slice sampling
         ("poisson", None, 0.5),
@@ -414,9 +486,11 @@ def test_incompatible_step_raises(*, step, toy_inputs_under_reporting):
         )
 
 
-@pytest.mark.parametrize("kwarg", ["initvals", "init", "jitter_max_retries"])
-def test_fit_model_rejects_initialisation_kwargs(*, kwarg, toy_inputs):
-    # fit_model sets the chains' starts itself
+@pytest.mark.parametrize(
+    "kwarg", ["initvals", "init", "jitter_max_retries", "nuts_sampler"]
+)
+def test_fit_model_rejects_kwargs_it_sets(*, kwarg, toy_inputs):
+    # fit_model sets the chains' starts and sampler itself
     with pytest.raises(ValueError, match=kwarg):
         fit_model(
             model_name="poisson",
@@ -426,9 +500,25 @@ def test_fit_model_rejects_initialisation_kwargs(*, kwarg, toy_inputs):
         )
 
 
-def test_fit_model_counts_divergences_before_thinning(*, toy_inputs):
-    # A huge step size without tuning makes every draw diverge, and thinning drops half of
-    # them from the sample stats, but not from the count
+@pytest.mark.parametrize(
+    ("count_name", "stat_name", "kwargs"),
+    [
+        # A huge step size without tuning makes every draw of PyMC's NUTS diverge
+        (
+            "n_divergences",
+            "diverging",
+            {"step": lambda: pm.NUTS(step_scale=20), "tune": 0},
+        ),
+        # Trees of depth 1 at most leave most of nutpie's draws at the maximum depth
+        (
+            "n_max_treedepth",
+            "maxdepth_reached",
+            {"tune": 10, "nuts": {"max_treedepth": 1}},
+        ),
+    ],
+)
+def test_fit_model_counts_before_thinning(*, count_name, stat_name, kwargs, toy_inputs):
+    # Thinning drops half of the counted draws from the sample stats, but not from the count
     traces = {
         thin: fit_model(
             model_name="poisson",
@@ -437,18 +527,48 @@ def test_fit_model_counts_divergences_before_thinning(*, toy_inputs):
             thin=thin,
             chains=2,
             cores=1,
-            tune=0,
             draws=20,
             progressbar=False,
             compute_convergence_checks=False,
-            nuts={"step_scale": 20},
+            **kwargs,
         )
         for thin in (1, 2)
     }
-    n_divergences = int(traces[1].sample_stats["diverging"].sum())
-    assert n_divergences > int(traces[2].sample_stats["diverging"].sum())
+    count = int(traces[1].sample_stats[stat_name].sum())
+    assert count > int(traces[2].sample_stats[stat_name].sum())
     for trace in traces.values():
-        assert trace.sample_stats.attrs["n_divergences"] == n_divergences
+        assert trace.sample_stats.attrs[count_name] == count
+
+
+@pytest.mark.parametrize(
+    ("reporting_prob", "step", "stat_name"),
+    [
+        (1.0, None, "maxdepth_reached"),
+        # PyMC, with Metropolis for the unreported cases, or with the step given
+        (0.5, None, "reached_max_treedepth"),
+        (1.0, pm.NUTS, "reached_max_treedepth"),
+    ],
+)
+def test_fit_model_samples_with_nutpie_where_it_can(
+    *, reporting_prob, step, stat_name, toy_inputs
+):
+    # Told apart by their names for the stat of draws at the maximum tree depth, both
+    # counted
+    trace = fit_model(
+        model_name="ssi",
+        **toy_inputs,
+        rng=np.random.default_rng(0),
+        reporting_prob=reporting_prob,
+        step=step,
+        chains=2,
+        cores=1,
+        tune=10,
+        draws=10,
+        progressbar=False,
+        compute_convergence_checks=False,
+    )
+    assert stat_name in trace.sample_stats
+    assert {"n_divergences", "n_max_treedepth"} <= set(trace.sample_stats.attrs)
 
 
 def test_fit_model_under_reporting_with_several_chains(*, toy_inputs_under_reporting):
@@ -632,22 +752,22 @@ def test_fit_diagnostics_sparse_counts(*, separated):
     assert diagnostics["mean_total_unreported"] == pytest.approx(0.02)
 
 
-@pytest.mark.parametrize("n_divergences", [None, 3])
-def test_fit_diagnostics_divergences(*, n_divergences):
-    # NaN without a count (NUTS didn't run)
+@pytest.mark.parametrize("counts", [{}, {"n_divergences": 3, "n_max_treedepth": 5}])
+def test_fit_diagnostics_counts(*, counts):
+    # The numbers of divergences and of draws at the maximum tree depth, NaN without a
+    # count (NUTS didn't run)
     rng = np.random.default_rng(0)
     diagnostics = compute_fit_diagnostics(
         trace=_synthetic_trace(
             posterior={"x": (("chain", "draw"), rng.normal(size=(2, 100)))},
-            sample_stats_attrs=(
-                {} if n_divergences is None else {"n_divergences": n_divergences}
-            ),
+            sample_stats_attrs=counts,
         )
     )
-    if n_divergences is None:
-        assert np.isnan(diagnostics["n_divergences"])
-    else:
-        assert diagnostics["n_divergences"] == n_divergences
+    for count_name in ("n_divergences", "n_max_treedepth"):
+        if counts:
+            assert diagnostics[count_name] == counts[count_name]
+        else:
+            assert np.isnan(diagnostics[count_name])
     assert "mean_total_unreported" not in diagnostics
 
 
@@ -680,6 +800,7 @@ def test_fit_diagnostics_of_fit(*, toy_inputs_under_reporting):
         if name.startswith("n_diagnosed_")
     }
     assert diagnostics["n_divergences"] >= 0
+    assert diagnostics["n_max_treedepth"] >= 0
     assert diagnostics["mean_total_unreported"] == pytest.approx(
         float(trace.posterior["unreported_incidence"].sum(dim="local_day").mean())
     )

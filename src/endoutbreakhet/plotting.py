@@ -48,6 +48,7 @@ _GATE_CRITERION_TITLES = {
     "ess_bulk": "Bulk ESS",
     "ess_tail": "Tail ESS",
     "divergences": "Divergences",
+    "tree_depth": "Max tree depth",
     "risk": "Risk",
 }
 

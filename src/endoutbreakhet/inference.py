@@ -4,9 +4,9 @@ from collections.abc import Sequence
 import arviz_stats
 import numpy as np
 import pymc as pm
+import pytensor.scalar as ps
 import pytensor.tensor as pt
-from pymc.initial_point import make_initial_point_fn
-from pymc.step_methods.compound import Competence, CompoundStep
+from pytensor.tensor import elemwise as pytensor_elemwise
 
 from endoutbreakhet.utils import (
     delay_matrix,
@@ -36,15 +36,19 @@ def fit_model(
     # independently with probability reporting_prob (the day-0 cases are imported, and taken
     # to be reported). step, if given, is either a step method class (e.g. pm.Slice) for the
     # continuous variables, leaving pm.sample to assign Metropolis to any unreported case
-    # counts, or a factory for step methods with explicit variables. Each chain starts from
-    # its own point (see _dispersed_starts), and the number of divergences after warm-up (if
-    # NUTS ran) is kept in the sample stats' attrs as n_divergences
+    # counts, or a factory for step methods with explicit variables. Without a step, nutpie
+    # samples models with only continuous variables, and PyMC the rest, with NUTS for the
+    # continuous variables and Metropolis for the unreported case counts. Each chain starts
+    # from its own point (see _dispersed_starts), and the numbers of divergences and of draws
+    # at the maximum tree depth after warm-up (if NUTS ran) are kept in the sample stats'
+    # attrs as n_divergences and n_max_treedepth
     owned_kwargs = sorted(
-        {"initvals", "init", "jitter_max_retries"} & set(sample_kwargs)
+        {"initvals", "init", "jitter_max_retries", "nuts_sampler"} & set(sample_kwargs)
     )
     if owned_kwargs:
         raise ValueError(
-            f"fit_model sets the chains' starts, so doesn't take {', '.join(owned_kwargs)}"
+            "fit_model sets the chains' starts and sampler, so doesn't take "
+            f"{', '.join(owned_kwargs)}"
         )
     pm_model = _build_pymc_model(
         model_name=model_name,
@@ -64,26 +68,35 @@ def fit_model(
         if step is not None:
             _check_step(step=sample_kwargs["step"], model=pm_model)
 
-        # Exact starts on both of pm.sample's paths: "adapt_diag" stops it jittering them
-        # where NUTS samples every variable, and it never does otherwise
-        trace = pm.sample(
-            chains=chains,
-            initvals=_dispersed_starts(
-                model=pm_model,
-                reported_incidence_vec=reported_incidence_vec,
+        if step is None and not pm_model.discrete_value_vars:
+            # nutpie starts each chain as _dispersed_starts would
+            trace = pm.sample(
+                chains=chains, nuts_sampler="nutpie", random_seed=rng, **sample_kwargs
+            )
+        else:
+            trace = pm.sample(
                 chains=chains,
-                rng=rng,
-            ),
-            init="adapt_diag",
-            random_seed=rng,
-            **sample_kwargs,
-        )
-    # Counted before thinning, which would leave out divergent draws
-    n_divergences = (
-        int(trace.sample_stats["diverging"].sum())
-        if "diverging" in trace.sample_stats
-        else None
-    )
+                nuts_sampler="pymc",
+                initvals=_dispersed_starts(
+                    model=pm_model,
+                    reported_incidence_vec=reported_incidence_vec,
+                    chains=chains,
+                    rng=rng,
+                ),
+                random_seed=rng,
+                **sample_kwargs,
+            )
+    # Counted before thinning, which would leave out such draws. PyMC and nutpie name the
+    # stat of draws at the maximum tree depth differently
+    counts = {
+        count_name: int(trace.sample_stats[stat_name].sum())
+        for count_name, stat_name in [
+            ("n_divergences", "diverging"),
+            ("n_max_treedepth", "reached_max_treedepth"),
+            ("n_max_treedepth", "maxdepth_reached"),
+        ]
+        if stat_name in trace.sample_stats
+    }
     if thin > 1:
         trace = trace.isel(draw=slice(0, None, thin))
         trace = trace.map_over_datasets(
@@ -93,24 +106,24 @@ def fit_model(
                 else ds
             )
         )
-    if n_divergences is not None:
-        trace.sample_stats.attrs["n_divergences"] = n_divergences
+    trace.sample_stats.attrs.update(counts)
     return trace
 
 
 def compute_fit_diagnostics(*, trace):
-    # Convergence diagnostics of a fit from fit_model: the number of divergences after
-    # warm-up (NaN if NUTS didn't run), and for each posterior variable (deterministics
-    # included, as risks are computed from them) the numbers of elements with a non-finite
-    # draw, of finite elements that are the same in every draw, and of the rest, over which
-    # the worst and median rank-normalised R-hat and bulk and tail ESS are taken (NaN if
-    # there are none). Elements with a non-finite draw are left out, since an infinite draw
-    # can still give R-hat near 1, as are constant ones, which have no R-hat (whether they're
-    # rare-event samples or chains stuck together). The keys depend only on the model, so
-    # diagnostics of fits to different days stack. Also the posterior mean total of any
-    # unreported cases
+    # Convergence diagnostics of a fit from fit_model: the numbers of divergences and of
+    # draws at the maximum tree depth after warm-up (NaN if NUTS didn't run), and for each
+    # posterior variable (deterministics included, as risks are computed from them) the
+    # numbers of elements with a non-finite draw, of finite elements that are the same in
+    # every draw, and of the rest, over which the worst and median rank-normalised R-hat and
+    # bulk and tail ESS are taken (NaN if there are none). Elements with a non-finite draw
+    # are left out, since an infinite draw can still give R-hat near 1, as are constant ones,
+    # which have no R-hat (whether they're rare-event samples or chains stuck together). The
+    # keys depend only on the model, so diagnostics of fits to different days stack. Also
+    # the posterior mean total of any unreported cases
     diagnostics = {
-        "n_divergences": trace.sample_stats.attrs.get("n_divergences", np.nan)
+        count_name: trace.sample_stats.attrs.get(count_name, np.nan)
+        for count_name in ("n_divergences", "n_max_treedepth")
     }
     posterior = trace.posterior
     for name, values in posterior.data_vars.items():
@@ -572,18 +585,18 @@ def _gamma_via_uniform(*, name, mean_vec, rate, latent_idx):
     # Gamma variables on every day with means mean_vec and rate rate, so shape
     # rate * mean_vec, which are zero where mean_vec is. Only the days in latent_idx
     # (outside which mean_vec is zero) get a uniform u. Inverse gamma transformation of
-    # uniforms improves efficiency, but has no gradient with respect to the shape, so an
-    # estimated rate (the models' dispersion) can't be sampled by NUTS (u can)
+    # uniforms improves efficiency, and with _gammaincinv's gradient in the shape, NUTS
+    # samples an estimated rate (the models' dispersion) along with u
     _add_coord(name="day", values=np.arange(len(latent_idx)))
     _add_coord(name="latent_day", values=np.flatnonzero(latent_idx))
     latent_mean_vec = mean_vec[latent_idx]
     nonzero_mean_idx = latent_mean_vec > 0
-    # Both branches of the switch are evaluated, and a zero shape anywhere makes the
-    # inverse CDF raise, so zero means are replaced in the unused branch (any positive value
+    # Both branches of the switch are evaluated, and a zero shape gives NaN in the inverse CDF
+    # and its gradient, so zero means are replaced in the unused branch (any positive value
     # would do)
     safe_mean_vec = pt.switch(nonzero_mean_idx, latent_mean_vec, 1)
     u = pm.Uniform("u", 0, 1, dims="latent_day")
-    latent_gamma_vec = pm.icdf(pm.Gamma.dist(alpha=rate * safe_mean_vec, beta=rate), u)
+    latent_gamma_vec = _gammaincinv(rate * safe_mean_vec, u) / rate
     return pm.Deterministic(
         name,
         pt.set_subtensor(
@@ -592,6 +605,25 @@ def _gamma_via_uniform(*, name, mean_vec, rate, latent_idx):
         ),
         dims="day",
     )
+
+
+class _GammaIncInv(ps.GammaIncInv):
+    # PyTensor's inverse of the regularised lower incomplete gamma function P, with the
+    # gradient in the shape k that it leaves unimplemented. z = P^-1(k, x) has P(k, z) = x, so
+    # implicitly dz/dk = -P_k(k, z) / p(k, z) and dz/dx = 1 / p(k, z), p being the Gamma(k, 1)
+    # density (in log space, as Gamma(k) overflows at large shapes) and P_k PyTensor's own
+    # gradient of P. Both are zero where z underflows to zero at small shapes. dz/dk inherits
+    # P_k's limits: it loses accuracy very near x = 0 or 1, costing NUTS efficiency but not
+    # exactness, and is NaN at shapes of several hundred. The signature is PyTensor's
+    def pullback(self, inputs, outputs, grads):
+        (k, _), (z,), (gz,) = inputs, outputs, grads
+        dz_dx = ps.exp(z + ps.gammaln(k) + (1 - k) * ps.log(z))
+        return [-gz * ps.gammainc_grad(k, z) * dz_dx, gz * dz_dx]
+
+
+_gammaincinv = pytensor_elemwise.Elemwise(
+    _GammaIncInv(ps.upgrade_to_float, name="gammaincinv")
+)
 
 
 def _add_coord(*, name, values):
@@ -610,14 +642,14 @@ def _check_step(*, step, model):
         for method in step:
             _check_step(step=method, model=model)
         return
-    if isinstance(step, CompoundStep):
+    if isinstance(step, pm.step_methods.CompoundStep):
         _check_step(step=step.methods, model=model)
         return
     for var in step.vars:
         if var not in model.discrete_value_vars:
             continue
         (competence,) = type(step)._competence(model.values_to_rvs[var], False)
-        if competence == Competence.INCOMPATIBLE:
+        if competence == pm.step_methods.compound.Competence.INCOMPATIBLE:
             raise ValueError(
                 f"{type(step).__name__} can't sample the discrete variable {var.name}: "
                 "leave it to pm.sample's automatic assignment, or use pm.Metropolis"
@@ -625,9 +657,9 @@ def _check_step(*, step, model):
 
 
 def _dispersed_starts(*, model, reported_incidence_vec, chains, rng):
-    # A start for each chain, by transformed variable name: the model's initial point with
-    # U(-1, 1) jitter on the continuous variables in sampling space (as pm.sample applies
-    # only where NUTS samples every variable), and any unreported case counts at their
+    # A start for each chain PyMC samples, by transformed variable name: the model's initial
+    # point with U(-1, 1) jitter on the continuous variables in sampling space (as nutpie
+    # starts its chains, redrawing them likewise), and any unreported case counts at their
     # initial values plus the chain's index on each day with reported cases. Those days
     # already have nonzero force of infection/disease, and adding cases only raises it on
     # later days, so the counts stay in the support. Other days, which may have zero force,
@@ -635,7 +667,7 @@ def _dispersed_starts(*, model, reported_incidence_vec, chains, rng):
     # tuned scale, so a count at zero in every draw of every chain is more likely rarely
     # above zero than stuck. Each start is redrawn until it has finite density (a jittered
     # gamma latent can underflow to zero)
-    initial_point_func = make_initial_point_fn(
+    initial_point_func = pm.initial_point.make_initial_point_fn(
         model=model,
         jitter_rvs={model.values_to_rvs[var] for var in model.continuous_value_vars},
         return_transformed=True,

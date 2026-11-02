@@ -148,7 +148,7 @@ def test_plot_model_probabilities():
 def test_plot_fit_gate():
     # Two specs over three days, with the second spec's fit failing on day 11
     statuses = np.array([["pass", "pass", "unassessed"], ["pass", "fail", "pass"]])
-    criteria = ("rhat", "ess_bulk", "ess_tail", "divergences", "risk")
+    criteria = ("rhat", "ess_bulk", "ess_tail", "divergences", "tree_depth", "risk")
     fig = plot_fit_gate(
         status_by_criterion=dict.fromkeys(criteria, statuses),
         fit_status=np.array([["pass", "pass", "pass"], ["pass", "fail", "pass"]]),
@@ -177,6 +177,7 @@ def test_plot_fit_gate():
         "Bulk ESS",
         "Tail ESS",
         "Divergences",
+        "Max tree depth",
         "Risk",
     ]
     for ax in criterion_axes:

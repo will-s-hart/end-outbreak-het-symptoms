@@ -13,7 +13,13 @@ _STAT_CRITERIA = {
     "ess_bulk": "min_ess_bulk",
     "ess_tail": "min_ess_tail",
 }
-_DAY_CRITERIA = (*_STAT_CRITERIA, "divergences", "risk")
+# Fit criteria on a count of NUTS's draws after warm-up, by its column in the diagnostics
+# and its threshold's name
+_COUNT_CRITERIA = {
+    "divergences": ("n_divergences", "max_n_divergences"),
+    "tree_depth": ("n_max_treedepth", "max_n_max_treedepth"),
+}
+_DAY_CRITERIA = (*_STAT_CRITERIA, *_COUNT_CRITERIA, "risk")
 
 
 def make_plots():
@@ -92,14 +98,15 @@ def _gate(*, diagnostics_df, risk_df, log_evidence_se, fixed_param_names, thresh
         )
         for criterion, stat_prefix in _STAT_CRITERIA.items()
     }
-    n_divergences_vec = diagnostics_df["n_divergences"].to_numpy(dtype=float)
-    gate["divergences"] = np.where(
-        np.isnan(n_divergences_vec),
-        "unassessed",
-        np.where(n_divergences_vec <= thresholds["max_n_divergences"], "pass", "fail"),
-    )
+    for criterion, (column, threshold_name) in _COUNT_CRITERIA.items():
+        count_vec = diagnostics_df[column].to_numpy(dtype=float)
+        gate[criterion] = np.where(
+            np.isnan(count_vec),
+            "unassessed",
+            np.where(count_vec <= thresholds[threshold_name], "pass", "fail"),
+        )
     gate["fit"] = _combine(
-        statuses=[gate[criterion] for criterion in (*_STAT_CRITERIA, "divergences")]
+        statuses=[gate[criterion] for criterion in (*_STAT_CRITERIA, *_COUNT_CRITERIA)]
     )
     gate["risk"] = _combine(
         statuses=[
@@ -282,13 +289,14 @@ def _print_spec_problems(
                 f"{days[worst]} (median over elements {median:.4g})"
             )
 
-    if np.any(gate["divergences"] == "fail"):
-        n_divergences_vec = diagnostics_df["n_divergences"].to_numpy()
-        worst = np.nanargmax(n_divergences_vec)
-        print(
-            f"    divergences: worst {n_divergences_vec[worst]:.0f} on day "
-            f"{days[worst]} (median over days {np.nanmedian(n_divergences_vec):.0f})"
-        )
+    for criterion, (column, _) in _COUNT_CRITERIA.items():
+        if np.any(gate[criterion] == "fail"):
+            count_vec = diagnostics_df[column].to_numpy()
+            worst = np.nanargmax(count_vec)
+            print(
+                f"    {criterion}: worst {count_vec[worst]:.0f} on day {days[worst]} "
+                f"(median over days {np.nanmedian(count_vec):.0f})"
+            )
 
     for risk_type in _risk_types(risk_df=risk_df):
         fail_idx = ~_risk_passes(

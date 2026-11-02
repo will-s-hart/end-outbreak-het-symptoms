@@ -16,22 +16,37 @@ PRIORS_ESTIMATED_DISPERSION = {
     **PRIORS_POISSON,
     "dispersion": {"dist": "lognormal", "median": 0.18, "quantile_025": 0.018},
 }
+# Sampler settings for the specs with every case reported, which nutpie samples. The high
+# target acceptance stops NUTS diverging where the dispersion is estimated
+FIT_KWARGS = {
+    "chains": 4,
+    "draws": 3000,
+    "tune": 1000,
+    "thin": 1,
+    "target_accept": 0.999,
+}
+# For the under-reporting specs, which PyMC samples with NUTS for the continuous variables
+# and Metropolis for the unreported counts. Metropolis mixes slowly, hence the extra draws
+FIT_KWARGS_UNDER_REPORTING = FIT_KWARGS | {"draws": 4000, "target_accept": 0.9}
 MODEL_SPECS: dict[str, dict[str, Any]] = {
     "poisson": {
         "model_name": "poisson",
         "priors": PRIORS_POISSON,
         "reporting_prob": 1.0,
+        "fit_kwargs": FIT_KWARGS,
     },
     "poisson_so": {
         "model_name": "poisson_so",
         "priors": PRIORS_POISSON,
         "reporting_prob": 1.0,
+        "fit_kwargs": FIT_KWARGS,
     },
     **{
         f"{model_name}_{dispersion_type}_dispersion": {
             "model_name": model_name,
             "priors": priors,
             "reporting_prob": 1.0,
+            "fit_kwargs": FIT_KWARGS,
         }
         for model_name in ("dlo", "sse", "ssi", "sse_so", "ssi_so")
         for dispersion_type, priors in (
@@ -44,19 +59,15 @@ MODEL_SPECS: dict[str, dict[str, Any]] = {
             "model_name": model_name,
             "priors": PRIORS_FIXED_DISPERSION,
             "reporting_prob": reporting_prob,
+            "fit_kwargs": FIT_KWARGS_UNDER_REPORTING,
         }
         for model_name in ("sse", "ssi", "sse_so", "ssi_so")
         for reporting_prob in (0.6, 0.8)
     },
 }
-FIT_KWARGS = {
-    "chains": 4,
-    "draws": 1000,
-    "tune": 1000,
-    "thin": 1,
-    "target_accept": 0.9,
-}
-N_EVIDENCE_PROPOSAL_SAMPLES = 10_000
+# Cheap, being independent draws made on the comparison day only, and fewer added
+# appreciably to the under-reporting specs' log evidence SE
+N_EVIDENCE_PROPOSAL_SAMPLES = 100_000
 # Applied to the saved diagnostics by fit_diagnostics_plots only, so editing one never reruns
 # a fit
 FIT_GATE_THRESHOLDS = {
@@ -67,6 +78,10 @@ FIT_GATE_THRESHOLDS = {
     # Any divergence means exploration may be biased, so loosen this only for rare
     # divergences whose cause is understood, recording it here
     "max_n_divergences": 0,
+    # Draws whose trajectory hit NUTS's maximum tree depth: still valid transitions, but a
+    # sign the step size is small for the posterior (likeliest at a high target_accept),
+    # costing efficiency
+    "max_n_max_treedepth": 0,
     # Absolute: one percentage point
     "max_risk_mcse": 0.01,
     # Bounds the standard error of every posterior model probability by half this, to first
@@ -183,7 +198,7 @@ def get_inputs_model_fits(*, model_spec_name):
         "model_name": model_spec["model_name"],
         "priors": model_spec["priors"],
         "reporting_prob": model_spec["reporting_prob"],
-        "fit_kwargs": FIT_KWARGS,
+        "fit_kwargs": model_spec["fit_kwargs"],
         "n_evidence_proposal_samples": N_EVIDENCE_PROPOSAL_SAMPLES,
         # A stream of its own for each spec (keyed by name, so reordering the specs changes
         # nothing), so specs' log evidence errors are independent

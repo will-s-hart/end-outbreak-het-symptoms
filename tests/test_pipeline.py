@@ -92,8 +92,11 @@ def test_fits_data_through_each_day(
     padded_incidence_vec = np.concatenate(
         [pipeline_inputs["reported_incidence_vec"], [0, 0]]
     )
+    # Latest day first, as the longest fits shouldn't be the last out, each day riding its
+    # own stream of random numbers, the one spawned for it in day order
     assert len(fits) == len(days)
-    for fit, day in zip(fits, days, strict=True):
+    day_rngs = np.random.default_rng(_SEED).spawn(len(days))
+    for fit, day, day_rng in zip(fits, days[::-1], day_rngs[::-1], strict=True):
         np.testing.assert_array_equal(
             fit["reported_incidence_vec"], padded_incidence_vec[: day + 1]
         )
@@ -101,8 +104,7 @@ def test_fits_data_through_each_day(
             fit["reported_incidence_vec"].dtype
             == pipeline_inputs["reported_incidence_vec"].dtype
         )
-    # Each day rides its own stream of random numbers
-    assert len({fit["rng"].random() for fit in fits}) == len(days)
+        assert fit["rng"].random() == day_rng.random()
 
     # Each risk with its Monte Carlo standard error and R-hat beside it
     risk_vecs = {

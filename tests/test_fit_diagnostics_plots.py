@@ -37,42 +37,45 @@ def test_gate():
             {"day": day}
             | _diagnostics_row(
                 n_divergences=n_divergences,
+                n_max_treedepth=n_max_treedepth,
                 overrides_by_variable={
                     "a": a,
                     "b": b,
                     "dispersion": _UNASSESSED_DIAGNOSTICS,
                 },
             )
-            for day, (n_divergences, a, b) in enumerate(
+            for day, (n_divergences, n_max_treedepth, a, b) in enumerate(
                 [
                     # Everything passes
-                    (0, {}, {}),
+                    (0, 0, {}, {}),
                     # An R-hat past its threshold
-                    (0, {"max_rhat": 1.02}, {}),
+                    (0, 0, {"max_rhat": 1.02}, {}),
                     # A non-finite draw fails every criterion on the variable, and NUTS
                     # didn't run
-                    (np.nan, {"n_nonfinite": 1}, {}),
+                    (np.nan, np.nan, {"n_nonfinite": 1}, {}),
                     # A divergence, an infinite ESS and a NaN R-hat
-                    (1, {"min_ess_bulk": np.inf}, {"max_rhat": np.nan}),
+                    (1, 0, {"min_ess_bulk": np.inf}, {"max_rhat": np.nan}),
                     # A constant variable alongside one that passes, which is shown
                     # rather than passed, as it could be stuck in every chain
-                    (0, _UNASSESSED_DIAGNOSTICS, {}),
+                    (0, 0, _UNASSESSED_DIAGNOSTICS, {}),
                     # Constant variables only
-                    (0, _UNASSESSED_DIAGNOSTICS, _UNASSESSED_DIAGNOSTICS),
+                    (0, 0, _UNASSESSED_DIAGNOSTICS, _UNASSESSED_DIAGNOSTICS),
+                    # Draws at the maximum tree depth, which alone fail the fit
+                    (0, 3, {}, {}),
                 ]
             )
         ]
     )
     risk_df = pd.DataFrame(
         {
-            "day": np.arange(6),
+            "day": np.arange(7),
             "risk_cases": 0.5,
             # Within the threshold; past it; zero (constant samples, so no R-hat); a NaN
-            # R-hat; a NaN MCSE; an R-hat past its threshold
-            "risk_mcse_cases": [0.001, 0.02, 0.0, 0.001, np.nan, 0.001],
-            "risk_rhat_cases": [1.0, 1.0, np.nan, np.nan, 1.0, 1.02],
+            # R-hat; a NaN MCSE; an R-hat past its threshold; within the threshold
+            "risk_mcse_cases": [0.001, 0.02, 0.0, 0.001, np.nan, 0.001, 0.001],
+            "risk_rhat_cases": [1.0, 1.0, np.nan, np.nan, 1.0, 1.02, 1.0],
             "risk_transmission": 0.5,
-            "risk_mcse_transmission": [0.02, *[0.001] * 5],
+            "risk_mcse_transmission": [0.02, *[0.001] * 6],
             "risk_rhat_transmission": 1.0,
         }
     )
@@ -86,12 +89,29 @@ def test_gate():
     )
 
     expected = {
-        "rhat": ["pass", "fail", "fail", "fail", "unassessed", "unassessed"],
-        "ess_bulk": ["pass", "pass", "fail", "fail", "unassessed", "unassessed"],
-        "ess_tail": ["pass", "pass", "fail", "pass", "unassessed", "unassessed"],
-        "divergences": ["pass", "pass", "unassessed", "fail", "pass", "pass"],
-        "fit": ["pass", "fail", "fail", "fail", "unassessed", "unassessed"],
-        "risk": ["fail", "fail", "pass", "fail", "fail", "fail"],
+        "rhat": ["pass", "fail", "fail", "fail", "unassessed", "unassessed", "pass"],
+        "ess_bulk": [
+            "pass",
+            "pass",
+            "fail",
+            "fail",
+            "unassessed",
+            "unassessed",
+            "pass",
+        ],
+        "ess_tail": [
+            "pass",
+            "pass",
+            "fail",
+            "pass",
+            "unassessed",
+            "unassessed",
+            "pass",
+        ],
+        "divergences": ["pass", "pass", "unassessed", "fail", "pass", "pass", "pass"],
+        "tree_depth": ["pass", "pass", "unassessed", "pass", "pass", "pass", "fail"],
+        "fit": ["pass", "fail", "fail", "fail", "unassessed", "unassessed", "fail"],
+        "risk": ["fail", "fail", "pass", "fail", "fail", "fail", "pass"],
     }
     for criterion, statuses in expected.items():
         assert list(gate[criterion]) == statuses, criterion
@@ -107,7 +127,9 @@ def test_gate_evidence(*, log_evidence_se, status):
         diagnostics_df=pd.DataFrame(
             [
                 {"day": 0}
-                | _diagnostics_row(n_divergences=0, overrides_by_variable={"a": {}})
+                | _diagnostics_row(
+                    n_divergences=0, n_max_treedepth=0, overrides_by_variable={"a": {}}
+                )
             ]
         ),
         risk_df=pd.DataFrame(
@@ -138,8 +160,8 @@ def test_make_plots_writes_figure_and_summary(
     # Real inputs, with the results and figure redirected into tmp_path and fake results
     # written there, in which fixed parameters are constant. Under-reporting specs'
     # unreported cases are (1 - reporting prob) / reporting prob times the reported cases.
-    # If failing, the first spec fails R-hat on two days and its evidence, and a variable is
-    # constant on two others
+    # If failing, the first spec fails R-hat on two days and its evidence, a variable is
+    # constant on two others, and draws reach the maximum tree depth on another
     inputs = get_inputs_fit_diagnostics_plots()
     inputs["results_paths_by_spec"] = {
         model_spec_name: {key: tmp_path / path for key, path in paths.items()}
@@ -160,6 +182,7 @@ def test_make_plots_writes_figure_and_summary(
                 {"day": day}
                 | _diagnostics_row(
                     n_divergences=0,
+                    n_max_treedepth=0,
                     overrides_by_variable={
                         "a": {},
                         "b": {},
@@ -184,6 +207,7 @@ def test_make_plots_writes_figure_and_summary(
             diagnostics_df.loc[[3, 4], "max_rhat_a"] = 1.05
             for name, value in _UNASSESSED_DIAGNOSTICS.items():
                 diagnostics_df.loc[[7, 8], f"{name}_b"] = value
+            diagnostics_df.loc[10, "n_max_treedepth"] = 2
             log_evidence_se = 0.5
         diagnostics_df.to_csv(paths["diagnostics"], index=False)
         pd.DataFrame(
@@ -219,6 +243,10 @@ def test_make_plots_writes_figure_and_summary(
         )
         assert f"    a rhat: worst 1.05 on day {days[3]}" in output
         assert f"    b: constant in every draw on days {days[7]}-{days[8]}" in output
+        assert f"  tree_depth fails on 1 of {len(days)} days ({days[10]})\n" in output
+        assert (
+            f"    tree_depth: worst 2 on day {days[10]} (median over days 0)" in output
+        )
         assert "  evidence fails: log evidence SE 0.5" in output
     else:
         assert f"All {n_specs} specs pass the fit gate" in output
@@ -227,9 +255,9 @@ def test_make_plots_writes_figure_and_summary(
             assert f"  {model_spec_name}: 1-1\n" in output
 
 
-def _diagnostics_row(*, n_divergences, overrides_by_variable):
+def _diagnostics_row(*, n_divergences, n_max_treedepth, overrides_by_variable):
     # A day's diagnostics of each variable, passing unless overridden
-    row = {"n_divergences": n_divergences}
+    row = {"n_divergences": n_divergences, "n_max_treedepth": n_max_treedepth}
     for variable_name, overrides in overrides_by_variable.items():
         row |= {
             f"{name}_{variable_name}": value

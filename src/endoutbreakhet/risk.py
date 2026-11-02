@@ -1,6 +1,6 @@
 import arviz_stats
 import numpy as np
-from scipy.optimize.elementwise import find_root
+import scipy.optimize.elementwise
 
 from endoutbreakhet.utils import (
     delay_matrix,
@@ -492,7 +492,7 @@ def _lineage_unreported_extinction_prob(
     # precision near x = 1, where these terms are small. Exponentiating would round
     # G^(off)(x) to near 1, losing precision in its difference from x. find_root passes x
     # and args positionally, slicing args to the unconverged elements
-    result = find_root(
+    result = scipy.optimize.elementwise.find_root(
         lambda x, rep_no, dispersion=None: (
             np.log(x)
             - np.log1p(-reporting_prob)

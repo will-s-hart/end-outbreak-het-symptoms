@@ -17,9 +17,13 @@ rules. Model fitting, risk, evidence and the pipeline support under-reporting wi
 reporting probability (`reporting_prob`, set per model spec, with 60% and 80% reporting specs
 alongside the complete-reporting ones). Risk covers additional cases, transmission, sustained
 transmission and reported cases (DLO: cases and transmission only), and the pipeline records
-every risk type the model has, with its Monte Carlo SE and R̂. Each fit's chains start from
-dispersed points, and the pipeline saves every day's convergence diagnostics (R̂, bulk/tail
-ESS, divergences). `fit_diagnostics_plots` applies the fit gate's thresholds
+every risk type the model has, with its Monte Carlo SE and R̂. nutpie samples the models with
+only continuous variables (the gamma latents' inverse CDF has a shape gradient of the
+package's own), and PyMC the under-reporting ones, with NUTS for the continuous variables
+and Metropolis for the unreported counts. Each spec takes one of two sets of sampler settings (`FIT_KWARGS` and
+`FIT_KWARGS_UNDER_REPORTING` in `inputs.py`), each fit's chains start from dispersed points,
+and the pipeline saves every day's convergence diagnostics (R̂, bulk/tail ESS, divergences,
+draws at the maximum tree depth). `fit_diagnostics_plots` applies the fit gate's thresholds
 (`FIT_GATE_THRESHOLDS` in `inputs.py`) to the diagnostics, risks and log evidence SEs,
 reporting failures without blocking anything downstream. Keep this file in step as more land:
 describe what exists, not what is planned.

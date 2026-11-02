@@ -9,6 +9,8 @@ from scripts.inputs import (
     COMPARISON_SPECS,
     FIG_EXTENSIONS,
     FIT_GATE_THRESHOLDS,
+    FIT_KWARGS,
+    FIT_KWARGS_UNDER_REPORTING,
     MODEL_SPECS,
     get_inputs_delay_distributions,
     get_inputs_delay_distributions_plots,
@@ -22,16 +24,21 @@ from scripts.snakemake_utils import as_param
 
 @pytest.mark.parametrize("model_spec_name", MODEL_SPECS)
 def test_model_specs_build(*, model_spec_name, toy_inputs, monkeypatch):
-    # The spec's model on toy data, so skip loading the real data
+    # The spec's model on toy data, so skip loading the real data. Its sampler settings are
+    # nutpie's where every variable is continuous (as fit_model then samples with nutpie),
+    # and PyMC's with Metropolis otherwise
     monkeypatch.setattr(scripts.inputs, "_get_shared_inputs", dict)
     inputs = get_inputs_model_fits(model_spec_name=model_spec_name)
-    _build_pymc_model(
+    model = _build_pymc_model(
         model_name=inputs["model_name"],
         reported_incidence_vec=toy_inputs["reported_incidence_vec"],
         switch_day=toy_inputs["switch_day"],
         delay_distributions=toy_inputs["delay_distributions"],
         priors=inputs["priors"],
         reporting_prob=inputs["reporting_prob"],
+    )
+    assert inputs["fit_kwargs"] == (
+        FIT_KWARGS_UNDER_REPORTING if model.discrete_value_vars else FIT_KWARGS
     )
 
 

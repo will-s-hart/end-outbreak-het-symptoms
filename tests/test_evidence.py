@@ -2,7 +2,6 @@
 import types
 
 import numpy as np
-import pymc as pm
 import pytest
 import scipy.integrate
 import scipy.special
@@ -548,7 +547,6 @@ def test_bridge_sampling_ssi_matches_prior_sampling(*, toy_inputs):
         model_name="ssi",
         **toy_inputs,
         rng=rng,
-        step=pm.Slice,
         chains=4,
         tune=500,
         draws=1000,
@@ -595,8 +593,8 @@ def test_bridge_sampling_ssi_matches_prior_sampling(*, toy_inputs):
     )
 
 
-@pytest.mark.parametrize(("model_name", "step"), [("poisson", None), ("ssi", pm.Slice)])
-def test_bridge_sampling_matches_forward_simulation(*, model_name, step, toy_inputs):
+@pytest.mark.parametrize("model_name", ["poisson", "ssi"])
+def test_bridge_sampling_matches_forward_simulation(*, model_name, toy_inputs):
     # Under-reporting on a short series. Reference estimate by simulating total incidence
     # forward from the day-0 cases with parameters (and gamma latents) drawn from the
     # prior, and averaging the probability of the reported incidence given the total
@@ -611,10 +609,9 @@ def test_bridge_sampling_matches_forward_simulation(*, model_name, step, toy_inp
         **inputs,
         rng=rng,
         reporting_prob=reporting_prob,
-        step=step,
         chains=4,
-        # Chains run in this process, which earlier tests' numeric libraries may have
-        # made multi-threaded, so forking would risk deadlock
+        # One core, so the chains run in this process: forking it, which earlier tests'
+        # numeric libraries may have made multi-threaded, would risk deadlock
         cores=1,
         tune=500,
         draws=1000,
