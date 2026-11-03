@@ -10,6 +10,7 @@ import seaborn as sns
 from endoutbreakhet import DelayDistribution
 from endoutbreakhet.plotting import (
     _month_start_x_axis,
+    _summarise_unreported_pmf,
     make_panel_figure,
     plot_delay_distribution,
     plot_densities,
@@ -18,6 +19,7 @@ from endoutbreakhet.plotting import (
     plot_model_probabilities,
     plot_model_probabilities_inset,
     plot_risk_incidence_overlay,
+    plot_unreported_incidence,
     save_figure,
     set_plot_style,
 )
@@ -437,6 +439,177 @@ def test_plot_delay_distribution_with_overlay():
         "Naive models",
         "SO models (implied)",
     ]
+
+
+def test_plot_delay_distribution_colors():
+    # Each delay's bars in a colour of its own, translucent so an overlaid line stands out
+    colors = []
+    for delay_name in ("serial_interval", "inc_period", "tost"):
+        _, (ax,) = make_panel_figure(panel_widths=[1])
+        plot_delay_distribution(
+            ax=ax,
+            delay=DelayDistribution(prob=np.array([0.5, 0.5]), first_lag=1),
+            delay_name=delay_name,
+            max_lag=10,
+        )
+        (color,) = {bar.get_facecolor() for bar in ax.patches}
+        assert 0 < color[3] < 1
+        colors.append(color)
+    assert len(set(colors)) == len(colors)
+
+
+def test_reported_incidence_bars_alike_in_every_plot():
+    reported_incidence_vec = np.arange(60) % 4
+    fig, (incidence_ax, risk_ax, unreported_ax) = make_panel_figure(
+        panel_widths=[1, 1, 1]
+    )
+    plot_incidence(
+        ax=incidence_ax,
+        reported_incidence_vec=reported_incidence_vec,
+        first_case_date=_FIRST_CASE_DATE,
+        ert_days={},
+    )
+    plot_risk_incidence_overlay(
+        ax=risk_ax,
+        risk_df_by_model={
+            "sse": pd.DataFrame({"day": [40, 41], "risk_cases": [0.5, 0.4]})
+        },
+        reported_incidence_vec=reported_incidence_vec,
+        first_case_date=_FIRST_CASE_DATE,
+    )
+    plot_unreported_incidence(
+        ax=unreported_ax,
+        unreported_pmf_df_by_model={
+            "sse": pd.DataFrame(
+                {"day": [1, 2], "n_unreported": [0, 0], "probability": [1.0, 1.0]}
+            )
+        },
+        reported_incidence_vec=reported_incidence_vec,
+        first_case_date=_FIRST_CASE_DATE,
+        end_date=pd.Timestamp("2018-06-01"),
+    )
+    # The panels, then the risk panel's twin (the strip is a child of its panel)
+    *_, twin_ax = fig.axes
+    (strip_ax,) = unreported_ax.child_axes
+    bar_colors = [
+        {bar.get_facecolor() for bar in ax.patches}
+        for ax in (incidence_ax, twin_ax, strip_ax)
+    ]
+    assert len(bar_colors[0]) == 1
+    assert all(colors == bar_colors[0] for colors in bar_colors)
+
+
+def test_summarise_unreported_pmf():
+    # Daily means, and quantiles as the least counts whose cumulative probability reaches
+    # each level, even where rounding leaves it just short (on day 2, 44/120 + 73/120 sums
+    # to less than 0.975)
+    pmf_df = pd.DataFrame(
+        {
+            "day": [1, 1, 1, 2, 2, 2, 3],
+            "n_unreported": [0, 1, 2, 0, 1, 2, 1],
+            "probability": [0.5, 0.3, 0.2, 44 / 120, 73 / 120, 3 / 120, 1.0],
+        }
+    )
+    assert np.cumsum([44 / 120, 73 / 120])[-1] < 0.975
+    days, mean_vec, quantile_vecs = _summarise_unreported_pmf(
+        pmf_df=pmf_df, quantile_levels=(0.025, 0.5, 0.975)
+    )
+    np.testing.assert_array_equal(days, [1, 2, 3])
+    np.testing.assert_allclose(mean_vec, [0.7, 79 / 120, 1])
+    np.testing.assert_array_equal(quantile_vecs, [[0, 0, 1], [0, 1, 1], [2, 1, 1]])
+
+
+def test_plot_unreported_incidence():
+    model_names = ["sse", "ssi", "sse_so", "ssi_so"]
+    days = np.arange(1, 60)
+    # Two unreported cases each day with probability 0.5, so a mean of 1
+    pmf_df = pd.DataFrame(
+        {
+            "day": np.repeat(days, 2),
+            "n_unreported": np.tile([0, 2], len(days)),
+            "probability": 0.5,
+        }
+    )
+    fig, (ax,) = make_panel_figure(panel_widths=[None], n_columns=2)
+    plot_unreported_incidence(
+        ax=ax,
+        unreported_pmf_df_by_model=dict.fromkeys(model_names, pmf_df),
+        reported_incidence_vec=np.arange(60) % 4,
+        first_case_date=_FIRST_CASE_DATE,
+        end_date=pd.Timestamp("2018-06-01"),
+        vline_days=[34],
+    )
+    fig.canvas.draw()
+
+    # A strip per model, filling a two-column grid row by row, with shared axes
+    strip_axes = ax.child_axes
+    assert len(strip_axes) == len(model_names)
+    positions = [strip_ax.get_position() for strip_ax in strip_axes]
+    assert positions[0].x0 == pytest.approx(positions[2].x0)
+    assert positions[1].x0 == pytest.approx(positions[3].x0)
+    assert positions[0].x1 < positions[1].x0
+    assert positions[0].y0 == pytest.approx(positions[1].y0)
+    assert positions[2].y0 == pytest.approx(positions[3].y0)
+    assert positions[2].y1 < positions[0].y0
+    for strip_ax in strip_axes:
+        assert strip_ax.get_shared_x_axes().joined(strip_axes[0], strip_ax)
+        assert strip_ax.get_shared_y_axes().joined(strip_axes[0], strip_ax)
+
+    # Each strip's mean unreported cases, with the reported cases named in the first
+    # legend only
+    for strip_idx, strip_ax in enumerate(strip_axes):
+        mean_line, vline = strip_ax.get_lines()
+        np.testing.assert_array_equal(mean_line.get_xdata(), days)
+        np.testing.assert_allclose(mean_line.get_ydata(), 1)
+        assert vline.get_xdata()[0] == 34
+    assert [
+        [text.get_text() for text in strip_ax.get_legend().get_texts()]
+        for strip_ax in strip_axes
+    ] == [
+        ["Reported", "Unreported (SSE)"],
+        ["Unreported (SSI)"],
+        ["Unreported (SSE-SO)"],
+        ["Unreported (SSI-SO)"],
+    ]
+
+    # Ticks labelled on the outer strips only (get_*ticklabels leave out hidden labels),
+    # over the months before end_date: April and May
+    assert [bool(strip_ax.get_xticklabels()) for strip_ax in strip_axes] == [
+        False,
+        False,
+        True,
+        True,
+    ]
+    assert [bool(strip_ax.get_yticklabels()) for strip_ax in strip_axes] == [
+        True,
+        False,
+        True,
+        False,
+    ]
+    assert strip_axes[0].get_xlim() == (-3, 58)
+    assert strip_axes[0].get_ylim()[0] == 0
+    # One label for each axis, centred on the panel
+    assert [strip_ax.get_xlabel() for strip_ax in strip_axes] == [
+        "",
+        "",
+        "Date (2018)",
+        "",
+    ]
+    assert [strip_ax.get_ylabel() for strip_ax in strip_axes] == [
+        "",
+        "",
+        "Number of cases",
+        "",
+    ]
+    panel_extent = ax.get_window_extent()
+    xlabel_extent = strip_axes[2].xaxis.label.get_window_extent()
+    ylabel_extent = strip_axes[2].yaxis.label.get_window_extent()
+    assert (xlabel_extent.x0 + xlabel_extent.x1) / 2 == pytest.approx(
+        (panel_extent.x0 + panel_extent.x1) / 2
+    )
+    assert (ylabel_extent.y0 + ylabel_extent.y1) / 2 == pytest.approx(
+        (panel_extent.y0 + panel_extent.y1) / 2
+    )
 
 
 @pytest.mark.parametrize(

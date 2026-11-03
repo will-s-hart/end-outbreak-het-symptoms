@@ -1,6 +1,7 @@
 import matplotlib.colors
 import matplotlib.patches
 import matplotlib.pyplot as plt
+import matplotlib.ticker
 import numpy as np
 import pandas as pd
 import scipy.stats
@@ -50,15 +51,26 @@ _PARAM_LABELS = {
     "dispersion": r"$k$",
 }
 
+# Each naive model and its SO variant are a dark and a light shade of one hue
 _MODEL_STYLES = {
     "poisson": {"label": "Poisson", "color": "black"},
-    "sse": {"label": "SSE", "color": _COLORS["blue"]},
-    "ssi": {"label": "SSI", "color": _COLORS["green"]},
-    "dlo": {"label": "DLO", "color": _COLORS["red"]},
-    "sse_so": {"label": "SSE-SO", "color": _COLORS["purple"]},
-    "ssi_so": {"label": "SSI-SO", "color": _COLORS["orange"]},
     "poisson_so": {"label": "Poisson-SO", "color": _COLORS["gray"]},
+    "sse": {"label": "SSE", "color": _COLORS["blue"]},
+    "sse_so": {"label": "SSE-SO", "color": _COLORS["cyan"]},
+    "ssi": {"label": "SSI", "color": _COLORS["red"]},
+    "ssi_so": {"label": "SSI-SO", "color": _COLORS["orange"]},
+    "dlo": {"label": "DLO", "color": _COLORS["green"]},
 }
+
+# Reported cases, in every figure that shows them
+_INCIDENCE_COLOR = "darkgray"
+
+# The mean of the unreported cases each day, with this central interval of them, in a grid
+# of strips this many columns wide, gaps apart (in the panel's axes fraction): between
+# columns, room for the bottom row's outer x tick labels, and between rows, for the legends
+_UNREPORTED_INTERVAL = (0.025, 0.975)
+_UNREPORTED_N_COLUMNS = 2
+_UNREPORTED_GAPS = {"column": 0.06, "row": 0.09}
 
 # By the risk type's place among those in a panel, so the first is always solid
 _RISK_TYPE_LINESTYLES = ("-", "--", ":", "-.")
@@ -90,6 +102,14 @@ _DELAY_XLABELS = {
     "inc_period": "Incubation period (days)",
     "tost": "Time from symptom onset to transmission (days)",
 }
+
+# Drawn translucent, so a line overlaid on the bars stands out
+_DELAY_COLORS = {
+    "serial_interval": _COLORS["blue"],
+    "inc_period": _COLORS["green"],
+    "tost": _COLORS["purple"],
+}
+_DELAY_BAR_ALPHA = 0.5
 
 
 def set_plot_style():
@@ -329,8 +349,7 @@ def plot_risk_incidence_overlay(
     twin_ax.bar(
         x=np.arange(len(reported_incidence_vec)),
         height=reported_incidence_vec,
-        color="black",
-        alpha=0.5,
+        color=_INCIDENCE_COLOR,
     )
     twin_ax.set_ylim(0, np.max(reported_incidence_vec))
     twin_ax.set_ylabel("Number of cases")
@@ -345,11 +364,98 @@ def plot_risk_incidence_overlay(
     ax.patch.set_visible(False)
 
 
+def plot_unreported_incidence(
+    *,
+    ax,
+    unreported_pmf_df_by_model,
+    reported_incidence_vec,
+    first_case_date,
+    end_date,
+    vline_days=(),
+):
+    # A strip for each model, filling a grid across ax's panel row by row, of the reported
+    # cases by day since the first case, with the mean and central interval of the model's
+    # unreported cases each day, from their posterior pmf (in columns day, n_unreported and
+    # probability), over the whole months before end_date. The strips share their axes, so
+    # their counts can be compared, with ticks labelled on the outer strips only
+    ax.axis("off")
+    n_rows = -(-len(unreported_pmf_df_by_model) // _UNREPORTED_N_COLUMNS)
+    strip_width = (
+        1 - (_UNREPORTED_N_COLUMNS - 1) * _UNREPORTED_GAPS["column"]
+    ) / _UNREPORTED_N_COLUMNS
+    strip_height = (1 - (n_rows - 1) * _UNREPORTED_GAPS["row"]) / n_rows
+    strip_axes = []
+    for strip_idx, (model_name, pmf_df) in enumerate(
+        unreported_pmf_df_by_model.items()
+    ):
+        row_idx, column_idx = divmod(strip_idx, _UNREPORTED_N_COLUMNS)
+        strip_ax = ax.inset_axes(
+            (
+                column_idx * (strip_width + _UNREPORTED_GAPS["column"]),
+                1 - row_idx * _UNREPORTED_GAPS["row"] - (row_idx + 1) * strip_height,
+                strip_width,
+                strip_height,
+            ),
+            sharex=strip_axes[0] if strip_axes else None,
+            sharey=strip_axes[0] if strip_axes else None,
+        )
+        strip_axes.append(strip_ax)
+        model_style = _MODEL_STYLES[model_name]
+        days, mean_vec, (lower_vec, upper_vec) = _summarise_unreported_pmf(
+            pmf_df=pmf_df, quantile_levels=_UNREPORTED_INTERVAL
+        )
+        reported_bars = strip_ax.bar(
+            np.arange(len(reported_incidence_vec)),
+            reported_incidence_vec,
+            width=1,
+            color=_INCIDENCE_COLOR,
+        )
+        interval_band = strip_ax.fill_between(
+            days,
+            lower_vec,
+            upper_vec,
+            step="mid",
+            color=model_style["color"],
+            alpha=0.3,
+            linewidth=0,
+        )
+        (mean_line,) = strip_ax.step(
+            days, mean_vec, where="mid", color=model_style["color"]
+        )
+        for vline_day in vline_days:
+            strip_ax.axvline(vline_day, color="black", linestyle="--")
+        # The reported cases are the same in every strip, so only the first names them
+        legend_items = [
+            *([(reported_bars, "Reported")] if strip_idx == 0 else []),
+            ((interval_band, mean_line), f"Unreported ({model_style['label']})"),
+        ]
+        strip_ax.legend(*zip(*legend_items, strict=True), loc="upper right")
+        strip_ax.yaxis.set_major_locator(
+            matplotlib.ticker.MaxNLocator(nbins=4, integer=True)
+        )
+        strip_ax.tick_params(
+            labelbottom=(row_idx == n_rows - 1), labelleft=(column_idx == 0)
+        )
+    # One label for each axis, on the bottom left strip and centred on the panel. Only
+    # their position along the axis is set, as their distance from it is kept clear of the
+    # tick labels on each draw
+    label_ax = strip_axes[(n_rows - 1) * _UNREPORTED_N_COLUMNS]
+    _month_start_x_axis(
+        ax=label_ax,
+        day_0_date=first_case_date,
+        plot_days=days[days < (end_date - first_case_date).days],
+    )
+    label_ax.set_ylim(bottom=0)
+    label_ax.xaxis.label.set_x(0.5 / strip_width)
+    label_ax.set_ylabel("Number of cases")
+    label_ax.yaxis.label.set_y(0.5 / strip_height)
+
+
 def plot_incidence(*, ax, reported_incidence_vec, first_case_date, ert_days):
     # Reported cases by day since the first case, with the ERT's arrival and departure
     # (ert_days, by event) marked
     days = np.arange(len(reported_incidence_vec))
-    ax.bar(days, reported_incidence_vec, color="darkgray")
+    ax.bar(days, reported_incidence_vec, color=_INCIDENCE_COLOR)
     for event, day in ert_days.items():
         ax.axvline(day, color="black", linestyle="--")
         ax.annotate(
@@ -370,7 +476,14 @@ def plot_delay_distribution(
     *, ax, delay, delay_name, max_lag, label=None, overlay=None, overlay_label=None
 ):
     # Probability mass by lag as bars, optionally with another delay's as a line
-    bars = ax.bar(delay.lags, delay.prob, width=1, color=_COLORS["blue"], label=label)
+    bars = ax.bar(
+        delay.lags,
+        delay.prob,
+        width=1,
+        color=_DELAY_COLORS[delay_name],
+        alpha=_DELAY_BAR_ALPHA,
+        label=label,
+    )
     if overlay is not None:
         (line,) = ax.plot(
             overlay.lags, overlay.prob, color=_COLORS["red"], label=overlay_label
@@ -545,3 +658,24 @@ def _month_start_x_axis(*, ax, day_0_date, plot_days, interval_months=1):
     ax.set_xticks(month_start_days, labels=labels)
     ax.set_xlim(month_start_days[0], month_start_days[-1])
     ax.set_xlabel("Date" if multi_year else f"Date ({month_start_dates[0].year})")
+
+
+def _summarise_unreported_pmf(*, pmf_df, quantile_levels):
+    # The days of the unreported cases' pmf by day (in columns day, n_unreported and
+    # probability), with their mean on each and their quantiles at each of quantile_levels:
+    # the least count whose cumulative probability reaches the level (to within rounding of
+    # the probabilities)
+    prob_df = pmf_df.pivot(
+        index="day", columns="n_unreported", values="probability"
+    ).fillna(0)
+    counts = prob_df.columns.to_numpy()
+    prob_matrix = prob_df.to_numpy()
+    cdf_matrix = prob_matrix.cumsum(axis=1)
+    return (
+        prob_df.index.to_numpy(),
+        prob_matrix @ counts,
+        [
+            counts[np.argmax(cdf_matrix >= level - 1e-9, axis=1)]
+            for level in quantile_levels
+        ],
+    )

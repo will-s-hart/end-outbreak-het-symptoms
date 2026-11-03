@@ -9,6 +9,7 @@ from endoutbreakhet.plotting import (
     plot_model_probabilities,
     plot_model_probabilities_inset,
     plot_risk_incidence_overlay,
+    plot_unreported_incidence,
     save_figure,
     set_plot_style,
 )
@@ -21,81 +22,105 @@ def make_plots(*, comparison_spec_name):
         comparison_spec_name=comparison_spec_name
     )
 
-    results_paths_by_model = inputs["results_paths_by_model"]
-    fig_paths = inputs["fig_paths"]
-    param_names = inputs["param_names"]
-    posterior_df_by_model = {
-        model_name: pd.read_csv(paths["posterior"])
-        for model_name, paths in results_paths_by_model.items()
-    }
-    log_evidence_by_model = {
-        model_name: pd.read_csv(paths["evidence"])["log_evidence"].iloc[0]
-        for model_name, paths in results_paths_by_model.items()
-    }
-    risk_overlay_kwargs = {
-        "risk_df_by_model": {
-            model_name: pd.read_csv(paths["risk"])
-            for model_name, paths in results_paths_by_model.items()
-        },
-        "reported_incidence_vec": inputs["reported_incidence_vec"],
-        "first_case_date": inputs["first_case_date"],
-        "vline_days": [inputs["ert_days"]["arrival"], inputs["ert_days"]["departure"]],
-    }
+    # Each result the figures plot, by model
+    df_by_model_by_result = {}
+    for model_name, paths in inputs["results_paths_by_model"].items():
+        for result_name, path in paths.items():
+            df_by_model_by_result.setdefault(result_name, {})[model_name] = pd.read_csv(
+                path
+            )
+    vline_days = [inputs["ert_days"]["arrival"], inputs["ert_days"]["departure"]]
+    for fig_name, figure in inputs["figures"].items():
+        fig = _make_figure(
+            **figure,
+            df_by_model_by_result=df_by_model_by_result,
+            priors=inputs["priors"],
+            unreported_plot_end_date=inputs["unreported_plot_end_date"],
+            incidence_kwargs={
+                "reported_incidence_vec": inputs["reported_incidence_vec"],
+                "first_case_date": inputs["first_case_date"],
+                "vline_days": vline_days,
+            },
+        )
+        save_figure(fig=fig, paths=inputs["fig_paths"][fig_name])
 
-    # A column per parameter, then the model probabilities and the risks, which fill the rest
-    # of the last row. R_after's densities leave the upper right of its panel empty, so when
-    # it's the last parameter the model probabilities go in a box there instead, labelled as
-    # the next panel, and the risks take the whole last row
-    n_columns = len(param_names)
-    inset_model_probabilities = param_names[-1] == "rep_no_after"
-    labels = [f"{chr(ord('A') + idx)}." for idx in range(n_columns + 2)]
-    summary_fig, summary_axes = make_panel_figure(
-        panel_widths=[
-            *[1] * n_columns,
-            *([] if inset_model_probabilities else [1]),
-            None,
-        ],
-        n_columns=n_columns,
-        labels=(
-            [*labels[:n_columns], labels[-1]] if inset_model_probabilities else labels
-        ),
+
+def _make_figure(
+    *,
+    param_names,
+    unreported,
+    risk_types,
+    df_by_model_by_result,
+    priors,
+    unreported_plot_end_date,
+    incidence_kwargs,
+):
+    # A column per density panel (but at least two), with the densities and model
+    # probabilities a column wide and the unreported cases and risks filling the rest of
+    # their row. R_after's densities leave the upper right of their panel empty, so model
+    # probabilities following them go in a box there instead, labelled as a panel of its own
+    probabilities_inset = param_names[-1:] == ("rep_no_after",)
+    n_narrow = len(param_names) + (bool(param_names) and not probabilities_inset)
+    n_wide = unreported + bool(risk_types)
+    n_labels = n_narrow + n_wide + probabilities_inset
+    labels = (
+        [f"{chr(ord('A') + idx)}." for idx in range(n_labels)]
+        if n_labels > 1
+        else [None]
     )
-    densities_axes = summary_axes[:n_columns]
-    risk_ax = summary_axes[-1]
-    for ax, param_name in zip(densities_axes, param_names, strict=True):
+    inset_label = labels.pop(len(param_names)) if probabilities_inset else None
+    fig, axes = make_panel_figure(
+        panel_widths=[1] * n_narrow + [None] * n_wide,
+        n_columns=max(2, len(param_names)),
+        labels=labels,
+    )
+
+    for idx, (ax, param_name) in enumerate(
+        zip(axes[: len(param_names)], param_names, strict=True)
+    ):
         plot_densities(
             ax=ax,
-            posterior_df_by_model=posterior_df_by_model,
-            priors=inputs["priors"],
+            posterior_df_by_model=df_by_model_by_result["posterior"],
+            priors=priors,
             param_name=param_name,
             log_x=(param_name == "dispersion"),
-            legend=(param_name == "rep_no_before"),
+            legend=(idx == 0),
         )
-    model_probability_by_model = compute_model_probabilities(
-        log_evidence_by_model=log_evidence_by_model, prior_probability_by_model=None
-    )
-    if inset_model_probabilities:
-        plot_model_probabilities_inset(
-            ax=densities_axes[-1],
-            model_probability_by_model=model_probability_by_model,
-            label=labels[n_columns],
+    other_axes = iter(axes[len(param_names) :])
+    if param_names:
+        model_probability_by_model = compute_model_probabilities(
+            log_evidence_by_model={
+                model_name: evidence_df["log_evidence"].iloc[0]
+                for model_name, evidence_df in df_by_model_by_result["evidence"].items()
+            },
+            prior_probability_by_model=None,
         )
-    else:
-        plot_model_probabilities(
-            ax=summary_axes[n_columns],
-            model_probability_by_model=model_probability_by_model,
+        if probabilities_inset:
+            plot_model_probabilities_inset(
+                ax=axes[len(param_names) - 1],
+                model_probability_by_model=model_probability_by_model,
+                label=inset_label,
+            )
+        else:
+            plot_model_probabilities(
+                ax=next(other_axes),
+                model_probability_by_model=model_probability_by_model,
+            )
+    if unreported:
+        plot_unreported_incidence(
+            ax=next(other_axes),
+            unreported_pmf_df_by_model=df_by_model_by_result["unreported_incidence"],
+            end_date=unreported_plot_end_date,
+            **incidence_kwargs,
         )
-    plot_risk_incidence_overlay(
-        ax=risk_ax, risk_types=inputs["risk_types"], **risk_overlay_kwargs
-    )
-    save_figure(fig=summary_fig, paths=fig_paths["summary"])
-    # Each extra risk panel in a figure of its own
-    for risk_types in inputs["extra_risk_panels"]:
-        risk_fig, (risk_ax,) = make_panel_figure(panel_widths=[2])
+    if risk_types:
         plot_risk_incidence_overlay(
-            ax=risk_ax, risk_types=risk_types, **risk_overlay_kwargs
+            ax=next(other_axes),
+            risk_df_by_model=df_by_model_by_result["risk"],
+            risk_types=risk_types,
+            **incidence_kwargs,
         )
-        save_figure(fig=risk_fig, paths=fig_paths[f"risk_{'_'.join(risk_types)}"])
+    return fig
 
 
 if __name__ == "__main__":

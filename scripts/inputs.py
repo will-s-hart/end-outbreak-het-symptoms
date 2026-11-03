@@ -97,9 +97,10 @@ FIT_GATE_THRESHOLDS = {
 FIG_EXTENSIONS = ("svg", "png")
 DATA_PATH = pathlib.Path("data/equateur_2018_onsets.csv")
 
-# Each comparison's summary figure shows the densities of param_names, the model
-# probabilities and the risks of risk_types, and each of extra_risk_panels (a tuple of risk
-# types) gets a figure of its own
+# Each comparison's figures, by name, each with any of these panels, in this order: the prior
+# and posterior densities of each of param_names, followed by the model probabilities; the
+# unreported cases each day on the comparison day, if unreported; and the risks of
+# risk_types
 COMPARISON_SPECS: dict[str, dict[str, Any]] = {
     "naive_models_fixed_dispersion": {
         "model_spec_names": [
@@ -107,9 +108,12 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "sse_fixed_dispersion",
             "ssi_fixed_dispersion",
         ],
-        "risk_types": ("cases",),
-        "extra_risk_panels": (),
-        "param_names": ("rep_no_before", "rep_no_after"),
+        "figures": {
+            "summary": {
+                "param_names": ("rep_no_before", "rep_no_after"),
+                "risk_types": ("cases",),
+            },
+        },
     },
     "naive_models_estimated_dispersion": {
         "model_spec_names": [
@@ -117,9 +121,12 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "sse_estimated_dispersion",
             "ssi_estimated_dispersion",
         ],
-        "risk_types": ("cases",),
-        "extra_risk_panels": (),
-        "param_names": ("rep_no_before", "rep_no_after", "dispersion"),
+        "figures": {
+            "summary": {
+                "param_names": ("rep_no_before", "rep_no_after", "dispersion"),
+                "risk_types": ("cases",),
+            },
+        },
     },
     "naive_vs_so_fixed_dispersion": {
         "model_spec_names": [
@@ -128,9 +135,13 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "sse_so_fixed_dispersion",
             "ssi_so_fixed_dispersion",
         ],
-        "risk_types": ("cases", "transmission"),
-        "extra_risk_panels": (("sustained",),),
-        "param_names": ("rep_no_before", "rep_no_after"),
+        "figures": {
+            "summary": {
+                "param_names": ("rep_no_before", "rep_no_after"),
+                "risk_types": ("cases", "transmission"),
+            },
+            "risk_sustained": {"risk_types": ("sustained",)},
+        },
     },
     "naive_vs_so_estimated_dispersion": {
         "model_spec_names": [
@@ -139,9 +150,12 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "sse_so_estimated_dispersion",
             "ssi_so_estimated_dispersion",
         ],
-        "risk_types": ("cases", "transmission"),
-        "extra_risk_panels": (),
-        "param_names": ("rep_no_before", "rep_no_after", "dispersion"),
+        "figures": {
+            "summary": {
+                "param_names": ("rep_no_before", "rep_no_after", "dispersion"),
+                "risk_types": ("cases", "transmission"),
+            },
+        },
     },
     "poisson_vs_superspreading": {
         "model_spec_names": [
@@ -150,9 +164,12 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "ssi_fixed_dispersion",
             "ssi_so_fixed_dispersion",
         ],
-        "risk_types": ("cases", "transmission"),
-        "extra_risk_panels": (),
-        "param_names": ("rep_no_before", "rep_no_after"),
+        "figures": {
+            "summary": {
+                "param_names": ("rep_no_before", "rep_no_after"),
+                "risk_types": ("cases", "transmission"),
+            },
+        },
     },
     "naive_vs_so_60_pc_reporting": {
         "model_spec_names": [
@@ -161,9 +178,13 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "sse_so_60_pc_reporting",
             "ssi_so_60_pc_reporting",
         ],
-        "risk_types": ("cases", "transmission"),
-        "extra_risk_panels": (),
-        "param_names": ("rep_no_before", "rep_no_after"),
+        "figures": {
+            "summary": {
+                "param_names": ("rep_no_before", "rep_no_after"),
+                "unreported": True,
+                "risk_types": ("cases", "transmission"),
+            },
+        },
     },
     "naive_vs_so_80_pc_reporting": {
         "model_spec_names": [
@@ -172,9 +193,18 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "sse_so_80_pc_reporting",
             "ssi_so_80_pc_reporting",
         ],
-        "risk_types": ("cases", "transmission"),
-        "extra_risk_panels": (("cases", "reports"),),
-        "param_names": ("rep_no_before", "rep_no_after"),
+        "figures": {
+            "unreported_risk": {
+                "unreported": True,
+                "risk_types": ("cases", "transmission"),
+            },
+            "posterior": {
+                "param_names": ("rep_no_before", "rep_no_after"),
+            },
+            "risk_cases_reports": {
+                "risk_types": ("cases", "reports"),
+            },
+        },
     },
 }
 
@@ -240,17 +270,38 @@ def get_inputs_model_comparison_plots(*, comparison_spec_name):
         model_spec_name: MODEL_SPECS[model_spec_name]
         for model_spec_name in comparison_spec["model_spec_names"]
     }
+    figures: dict[str, dict[str, Any]] = {
+        fig_name: {"param_names": (), "unreported": False, "risk_types": (), **figure}
+        for fig_name, figure in comparison_spec["figures"].items()
+    }
 
-    # Keyed by model name, which the plots use to style each model
+    # Only the results the figures plot, keyed by model name, which the plots use to style
+    # each model
+    result_names = set()
+    for figure in figures.values():
+        if figure["param_names"]:
+            result_names |= {"posterior", "evidence"}
+        if figure["unreported"]:
+            result_names.add("unreported_incidence")
+        if figure["risk_types"]:
+            result_names.add("risk")
     results_paths_by_model = {
-        model_spec["model_name"]: get_results_paths_model_fits(
-            model_spec_name=model_spec_name
-        )
+        model_spec["model_name"]: {
+            result_name: path
+            for result_name, path in get_results_paths_model_fits(
+                model_spec_name=model_spec_name
+            ).items()
+            if result_name in result_names
+        }
         for model_spec_name, model_spec in model_specs.items()
     }
     # Each density plot shows one prior, so the specs must agree on it
     priors = {}
-    for param_name in comparison_spec["param_names"]:
+    for param_name in dict.fromkeys(
+        param_name
+        for figure in figures.values()
+        for param_name in figure["param_names"]
+    ):
         param_priors = [
             model_spec["priors"][param_name]
             for model_spec in model_specs.values()
@@ -267,9 +318,10 @@ def get_inputs_model_comparison_plots(*, comparison_spec_name):
         **_get_shared_inputs(),
         "results_paths_by_model": results_paths_by_model,
         "priors": priors,
-        "param_names": comparison_spec["param_names"],
-        "risk_types": comparison_spec["risk_types"],
-        "extra_risk_panels": comparison_spec["extra_risk_panels"],
+        "figures": figures,
+        # A month past the last reported case, by when every model's unreported cases are
+        # near zero
+        "unreported_plot_end_date": pd.Timestamp("2018-07-01"),
         "fig_paths": get_fig_paths_model_comparison_plots(
             comparison_spec_name=comparison_spec_name
         ),
@@ -318,6 +370,8 @@ def get_results_paths_model_fits(*, model_spec_name):
         "diagnostics": results_dir / "diagnostics.csv",
         "evidence": results_dir / "evidence.csv",
         "posterior": results_dir / "posterior.csv",
+        # Each day's posterior pmf of the unreported cases
+        "unreported_incidence": results_dir / "unreported_incidence.csv",
         "trace": results_dir / "trace.nc",
     }
 
@@ -331,17 +385,9 @@ def get_fig_paths_model_inputs_plots():
 def get_fig_paths_model_comparison_plots(*, comparison_spec_name):
     # One path per file format for each figure
     fig_dir = pathlib.Path("figures/model_comparison") / comparison_spec_name
-    comparison_spec = COMPARISON_SPECS[comparison_spec_name]
-    fig_names = [
-        "summary",
-        *(
-            f"risk_{'_'.join(risk_types)}"
-            for risk_types in comparison_spec["extra_risk_panels"]
-        ),
-    ]
     return {
         fig_name: [fig_dir / f"{fig_name}.{ext}" for ext in FIG_EXTENSIONS]
-        for fig_name in fig_names
+        for fig_name in COMPARISON_SPECS[comparison_spec_name]["figures"]
     }
 
 

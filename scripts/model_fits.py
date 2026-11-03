@@ -1,5 +1,6 @@
 import argparse
 
+import numpy as np
 import pandas as pd
 
 from endoutbreakhet import DelayDistribution, run_pipeline
@@ -41,7 +42,34 @@ def run_analyses(*, model_spec_name):
         name for name, values in posterior.items() if values.dims == ("chain", "draw")
     ]
     posterior[scalar_names].to_dataframe().to_csv(results_paths["posterior"])
+    _unreported_incidence_pmf_df(
+        trace=outputs["trace"], comparison_day=inputs["comparison_day"]
+    ).to_csv(results_paths["unreported_incidence"], index=False)
     outputs["trace"].to_netcdf(results_paths["trace"])
+
+
+def _unreported_incidence_pmf_df(*, trace, comparison_day):
+    # Each day's posterior pmf of the unreported cases, over the counts drawn on that day, by
+    # day since the first case up to comparison_day (the trace's day). Day-0 cases are
+    # imported and taken to be reported, and a model without under-reporting has none
+    # unreported on any day
+    if "unreported_incidence" not in trace.posterior:
+        return pd.DataFrame(
+            {
+                "day": np.arange(1, comparison_day + 1),
+                "n_unreported": 0,
+                "probability": 1.0,
+            }
+        )
+    draws_df = trace.posterior["unreported_incidence"].to_dataframe().reset_index()
+    return (
+        draws_df.groupby("local_day")["unreported_incidence"]
+        .value_counts(normalize=True)
+        .sort_index()
+        .rename_axis(["day", "n_unreported"])
+        .rename("probability")
+        .reset_index()
+    )
 
 
 if __name__ == "__main__":

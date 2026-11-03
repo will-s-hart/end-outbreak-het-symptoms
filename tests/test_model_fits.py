@@ -9,7 +9,7 @@ from scripts import model_fits
 from scripts.inputs import MODEL_SPECS, get_inputs_model_fits
 
 
-def test_run_analyses_passes_delays_and_reporting_prob_and_writes_diagnostics(
+def test_run_analyses_passes_delays_and_reporting_prob_and_writes_results(
     *, tmp_path, monkeypatch
 ):
     # Real inputs, with toy delay distributions and the results redirected into tmp_path
@@ -70,7 +70,17 @@ def test_run_analyses_passes_delays_and_reporting_prob_and_writes_diagnostics(
 
     def _run_pipeline(**kwargs):
         pipeline_kwargs.update(kwargs)
-        posterior = xr.Dataset({"rep_no_before": (("chain", "draw"), np.ones((1, 2)))})
+        posterior = xr.Dataset(
+            {
+                "rep_no_before": (("chain", "draw"), np.ones((1, 2))),
+                # Two draws of the unreported cases on days 1 and 2
+                "unreported_incidence": (
+                    ("chain", "draw", "local_day"),
+                    np.array([[[0, 1], [2, 1]]]),
+                ),
+            },
+            coords={"local_day": [1, 2]},
+        )
         return {
             "risk_df": pd.DataFrame({"day": [0]}),
             "diagnostics_df": diagnostics_df,
@@ -98,6 +108,35 @@ def test_run_analyses_passes_delays_and_reporting_prob_and_writes_diagnostics(
         pd.read_csv(inputs["results_paths"]["diagnostics"]),
         diagnostics_df,
         check_dtype=False,
+    )
+    # Only scalars in the posterior samples, and each day's pmf of the unreported cases over
+    # the counts drawn
+    assert list(pd.read_csv(inputs["results_paths"]["posterior"]).columns) == [
+        "chain",
+        "draw",
+        "rep_no_before",
+    ]
+    pd.testing.assert_frame_equal(
+        pd.read_csv(inputs["results_paths"]["unreported_incidence"]),
+        pd.DataFrame(
+            {
+                "day": [1, 1, 2],
+                "n_unreported": [0, 2, 1],
+                "probability": [0.5, 0.5, 1.0],
+            }
+        ),
+    )
+
+
+def test_unreported_incidence_pmf_df_zero_with_every_case_reported():
+    # No unreported cases in the trace, so none on any day after the first (whose cases
+    # are imported)
+    posterior = xr.Dataset({"rep_no_before": (("chain", "draw"), np.ones((1, 2)))})
+    pd.testing.assert_frame_equal(
+        model_fits._unreported_incidence_pmf_df(
+            trace=xr.DataTree.from_dict({"posterior": posterior}), comparison_day=3
+        ),
+        pd.DataFrame({"day": [1, 2, 3], "n_unreported": 0, "probability": 1.0}),
     )
 
 

@@ -11,6 +11,7 @@ from scripts.inputs import (
     get_fig_paths_model_inputs_plots,
     get_fig_paths_numbered,
     get_inputs_delay_distributions,
+    get_inputs_model_comparison_plots,
     get_inputs_model_fits,
     get_results_paths_delay_distributions,
     get_results_paths_model_fits,
@@ -49,6 +50,14 @@ def model_fits_results_paths(*, model_spec_name):
     return [path for name, path in results_paths.items() if name != "trace"]
 
 
+def model_comparison_plots_results_paths(*, comparison_spec_name):
+    # Just the results the comparison's figures plot, as the script reads them
+    results_paths_by_model = get_inputs_model_comparison_plots(
+        comparison_spec_name=comparison_spec_name
+    )["results_paths_by_model"]
+    return [path for paths in results_paths_by_model.values() for path in paths.values()]
+
+
 def model_comparison_plots_fig_paths(*, comparison_spec_name):
     fig_paths = get_fig_paths_model_comparison_plots(
         comparison_spec_name=comparison_spec_name
@@ -56,7 +65,7 @@ def model_comparison_plots_fig_paths(*, comparison_spec_name):
     return [path for paths in fig_paths.values() for path in paths]
 
 
-# Every figure's number (2-6 in the paper, S1-S5 in its supplement, A1 onwards for figures
+# Every figure's number (2-6 in the paper, S1-S6 in its supplement, A1 onwards for figures
 # in neither), with the figure the numbered copy is made from. Figure 1, the schematic, has
 # none yet
 numbered_figure_sources = {
@@ -69,12 +78,13 @@ numbered_figure_sources = {
             ("3", "naive_models_fixed_dispersion", "summary"),
             ("4", "naive_models_estimated_dispersion", "summary"),
             ("5", "naive_vs_so_fixed_dispersion", "summary"),
-            ("6", "naive_vs_so_80_pc_reporting", "summary"),
+            ("6", "naive_vs_so_80_pc_reporting", "unreported_risk"),
             ("S1", "naive_vs_so_estimated_dispersion", "summary"),
-            ("S2", "naive_vs_so_60_pc_reporting", "summary"),
-            ("S3", "naive_vs_so_fixed_dispersion", "risk_sustained"),
-            ("S4", "naive_vs_so_80_pc_reporting", "risk_cases_reports"),
-            ("S5", "poisson_vs_superspreading", "summary"),
+            ("S2", "naive_vs_so_80_pc_reporting", "posterior"),
+            ("S3", "naive_vs_so_60_pc_reporting", "summary"),
+            ("S4", "naive_vs_so_fixed_dispersion", "risk_sustained"),
+            ("S5", "naive_vs_so_80_pc_reporting", "risk_cases_reports"),
+            ("S6", "poisson_vs_superspreading", "summary"),
         )
     },
     "A1": get_fig_paths_fit_diagnostics_plots()["gate"],
@@ -223,7 +233,7 @@ rule fit_diagnostics_plots:
 
 # One rule per comparison spec rather than a wildcard, since which figures are made depends
 # on the spec
-for comparison_spec_name, comparison_spec in COMPARISON_SPECS.items():
+for comparison_spec_name in COMPARISON_SPECS:
 
     rule:
         name:
@@ -232,10 +242,9 @@ for comparison_spec_name, comparison_spec in COMPARISON_SPECS.items():
             shared_input_paths,
             "scripts/model_comparison_plots.py",
             DATA_PATH,
-            [
-                model_fits_results_paths(model_spec_name=model_spec_name)
-                for model_spec_name in comparison_spec["model_spec_names"]
-            ],
+            model_comparison_plots_results_paths(
+                comparison_spec_name=comparison_spec_name
+            ),
         output:
             model_comparison_plots_fig_paths(comparison_spec_name=comparison_spec_name),
         params:

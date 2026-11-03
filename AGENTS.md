@@ -20,14 +20,18 @@ covers additional cases, transmission, sustained transmission and reported cases
 and transmission only), and the pipeline records every risk type the model has, with its Monte
 Carlo SE and R̂. nutpie samples the models with only continuous variables (the gamma latents'
 inverse CDF has a shape gradient of the package's own), and PyMC the under-reporting ones, with
-NUTS for the continuous variables and Metropolis for the unreported counts. Each spec takes one
+NUTS for the continuous variables and Metropolis for the unreported counts. `model_fits` saves
+each spec's posterior pmf of the unreported cases each day on the comparison day (zero
+throughout with complete reporting) for the plots. Each spec takes one
 of two sets of sampler settings (`FIT_KWARGS` and `FIT_KWARGS_UNDER_REPORTING` in `inputs.py`),
 each fit's chains start from dispersed points, and the pipeline saves every day's convergence
 diagnostics (R̂, bulk/tail ESS, divergences, draws at the maximum tree depth).
 `fit_diagnostics_plots` applies the fit gate's thresholds (`FIT_GATE_THRESHOLDS` in
 `inputs.py`) to the diagnostics, risks and log evidence SEs, reporting failures without
-blocking anything downstream. Keep this file in step as more land: describe what exists, not
-what is planned.
+blocking anything downstream. Each comparison spec (`COMPARISON_SPECS` in `inputs.py`) lists
+its figures, each by the panels it has (densities with model probabilities, unreported cases,
+risks, in that order), which `model_comparison_plots` lays out. Keep this file in step as more land:
+describe what exists, not what is planned.
 
 ## Layout
 
@@ -45,7 +49,7 @@ what is planned.
 - `Snakefile` — orchestrates the full results-and-figures pipeline.
 - `data/` — inputs. `results/`, `figures/` — generated outputs, committed, except full MCMC
   traces (`results/**/trace.nc`, gitignored); what plots need from a trace is saved alongside
-  it as a tracked CSV.
+  it as tracked CSVs (`posterior.csv`, `unreported_incidence.csv`).
 
 Delay distributions travel as `DelayDistribution`s (a pmf and the lag it starts at) from
 discretisation, through the results CSVs (`to_df` / `from_df`, which checks the lags are

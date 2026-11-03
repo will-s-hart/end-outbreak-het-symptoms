@@ -46,53 +46,79 @@ def test_model_specs_build(*, model_spec_name, toy_inputs, monkeypatch):
 @pytest.mark.parametrize("comparison_spec_name", COMPARISON_SPECS)
 def test_comparison_specs_valid(*, comparison_spec_name):
     comparison_spec = COMPARISON_SPECS[comparison_spec_name]
-    # The plots key results by model name, so these must be distinct
-    model_names = [
-        MODEL_SPECS[model_spec_name]["model_name"]
+    model_specs = [
+        MODEL_SPECS[model_spec_name]
         for model_spec_name in comparison_spec["model_spec_names"]
     ]
+    # The plots key results by model name, so these must be distinct
+    model_names = [model_spec["model_name"] for model_spec in model_specs]
     assert len(set(model_names)) == len(model_names)
-    # Non-empty tuples (a missing trailing comma would leave a bare string) of risk types
-    # every model in the comparison records, for the summary figure and each extra panel
-    extra_risk_panels = comparison_spec["extra_risk_panels"]
-    assert isinstance(extra_risk_panels, tuple)
     recorded_risk_types = (
         {"cases", "transmission"}
         if "dlo" in model_names
         else {"cases", "transmission", "sustained", "reports"}
     )
-    for risk_types in (comparison_spec["risk_types"], *extra_risk_panels):
-        assert isinstance(risk_types, tuple) and risk_types
-        assert set(risk_types) <= recorded_risk_types
-    assert isinstance(comparison_spec["param_names"], tuple)
+    assert comparison_spec["figures"]
+    for figure in comparison_spec["figures"].values():
+        assert figure and figure.keys() <= {"param_names", "unreported", "risk_types"}
+        # Non-empty tuples (a missing trailing comma would leave a bare string)
+        for key in figure.keys() & {"param_names", "risk_types"}:
+            assert isinstance(figure[key], tuple) and figure[key]
+        # Given only to add the panel
+        assert figure.get("unreported", True) is True
+        # Risk types every model in the comparison records
+        assert set(figure.get("risk_types", ())) <= recorded_risk_types
 
 
 @pytest.mark.parametrize("comparison_spec_name", COMPARISON_SPECS)
 def test_get_inputs_model_comparison_plots(*, comparison_spec_name, monkeypatch):
-    # Only the paths and priors are checked, so skip loading the data
+    # Only the paths, priors and figures are checked, so skip loading the data
     monkeypatch.setattr(scripts.inputs, "_get_shared_inputs", dict)
     comparison_spec = COMPARISON_SPECS[comparison_spec_name]
     inputs = get_inputs_model_comparison_plots(
         comparison_spec_name=comparison_spec_name
     )
 
-    # Reads the results where the fits write them
+    # Every figure has each kind of panel, or not
+    figures = inputs["figures"]
+    assert figures.keys() == comparison_spec["figures"].keys()
+    for fig_name, figure in figures.items():
+        assert figure == {
+            "param_names": (),
+            "unreported": False,
+            "risk_types": (),
+            **comparison_spec["figures"][fig_name],
+        }
+    # Reads the results the figures plot, where the fits write them
+    plotted_result_names = {
+        result_name
+        for key, result_names in (
+            ("param_names", ("posterior", "evidence")),
+            ("unreported", ("unreported_incidence",)),
+            ("risk_types", ("risk",)),
+        )
+        if any(figure[key] for figure in figures.values())
+        for result_name in result_names
+    }
     assert inputs["results_paths_by_model"] == {
-        MODEL_SPECS[model_spec_name]["model_name"]: get_inputs_model_fits(
-            model_spec_name=model_spec_name
-        )["results_paths"]
+        MODEL_SPECS[model_spec_name]["model_name"]: {
+            result_name: path
+            for result_name, path in get_inputs_model_fits(
+                model_spec_name=model_spec_name
+            )["results_paths"].items()
+            if result_name in plotted_result_names
+        }
         for model_spec_name in comparison_spec["model_spec_names"]
     }
-    assert set(inputs["priors"]) == set(comparison_spec["param_names"])
+    # A prior for each parameter with densities in any figure
+    assert set(inputs["priors"]) == {
+        param_name
+        for figure in figures.values()
+        for param_name in figure["param_names"]
+    }
 
     fig_paths = inputs["fig_paths"]
-    assert set(fig_paths) == {
-        "summary",
-        *(
-            f"risk_{'_'.join(risk_types)}"
-            for risk_types in comparison_spec["extra_risk_panels"]
-        ),
-    }
+    assert list(fig_paths) == list(comparison_spec["figures"])
     for fig_name, paths in fig_paths.items():
         assert [path.suffix for path in paths] == [f".{ext}" for ext in FIG_EXTENSIONS]
         for path in paths:
@@ -110,9 +136,7 @@ def test_get_inputs_model_comparison_plots_raises_for_conflicting_priors(
         "conflicting_priors",
         {
             "model_spec_names": ["sse_fixed_dispersion", "ssi_estimated_dispersion"],
-            "risk_types": ("cases",),
-            "extra_risk_panels": (),
-            "param_names": ("rep_no_before", "dispersion"),
+            "figures": {"summary": {"param_names": ("rep_no_before", "dispersion")}},
         },
     )
     with pytest.raises(ValueError, match="different priors for dispersion"):
