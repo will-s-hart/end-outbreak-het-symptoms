@@ -92,6 +92,14 @@ commands** — wire them in as rules.
 - Fit rules take `threads: lambda wildcards: workflow.cores`, since the pipeline parallelises
   over all cores itself (`n_jobs=-1`). It's a callable because `workflow.cores` raises when
   `--cores` is unset, as under a cluster executor, where `--set-threads` gives the width.
+- `model_fits` has two rules, one per group of sampler settings:
+  - `model_fits_complete_reporting`;
+  - `model_fits_under_reporting`, derived from it with `use rule ... with:` and changing only
+    its `wildcard_constraints`.
+
+  A cluster profile can then give each group its own width and walltime, as the
+  under-reporting fits take several times as long. Each rule's name is written out, so the
+  profile's keys can be checked against it.
 - Inputs are chosen so a rule reruns when, and only when, something it consumes changes:
   - **Analysis rules** list `analysis_package_paths` (the package modules, globbed, minus
     `plotting.py`, which analysis scripts never import; `tests/test_imports.py` checks), their

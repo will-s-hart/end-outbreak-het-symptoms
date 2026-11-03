@@ -155,10 +155,13 @@ rule delay_distributions:
         "pixi run python -m scripts.delay_distributions"
 
 
-# Each fit gets the whole machine (the pipeline parallelises over days itself). The width is
-# a callable so it is only evaluated per job: workflow.cores raises when --cores is unset, as
-# under a cluster executor, where --set-threads replaces it before it would be called.
-rule model_fits:
+# One rule for the specs with complete reporting and one for those with under-reporting,
+# which take their own sampler settings, so that a cluster profile can size each group's jobs
+# (the under-reporting fits take several times as long). Each fit gets the whole machine
+# (the pipeline parallelises over days itself). The width is a callable so it is only
+# evaluated per job: workflow.cores raises when --cores is unset, as under a cluster
+# executor, where --set-threads replaces it before it would be called.
+rule model_fits_complete_reporting:
     input:
         analysis_package_paths,
         "scripts/model_fits.py",
@@ -167,7 +170,11 @@ rule model_fits:
     output:
         model_fits_results_paths(model_spec_name="{spec}"),
     wildcard_constraints:
-        spec="|".join(MODEL_SPECS),
+        spec="|".join(
+            model_spec_name
+            for model_spec_name, model_spec in MODEL_SPECS.items()
+            if model_spec["reporting_prob"] == 1
+        ),
     params:
         inputs=lambda wildcards: as_param(
             inputs=get_inputs_model_fits(model_spec_name=wildcards.spec)
@@ -175,6 +182,15 @@ rule model_fits:
     threads: lambda wildcards: workflow.cores
     shell:
         "pixi run python -m scripts.model_fits --spec {wildcards.spec}"
+
+
+use rule model_fits_complete_reporting as model_fits_under_reporting with:
+    wildcard_constraints:
+        spec="|".join(
+            model_spec_name
+            for model_spec_name, model_spec in MODEL_SPECS.items()
+            if model_spec["reporting_prob"] < 1
+        ),
 
 
 rule model_inputs_plots:
