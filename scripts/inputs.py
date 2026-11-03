@@ -20,14 +20,20 @@ PRIORS_ESTIMATED_DISPERSION = {
 # target acceptance stops NUTS diverging where the dispersion is estimated
 FIT_KWARGS = {
     "chains": 4,
-    "draws": 3000,
+    "draws": 4000,
     "tune": 1000,
     "thin": 1,
     "target_accept": 0.999,
 }
 # For the under-reporting specs, which PyMC samples with NUTS for the continuous variables
-# and Metropolis for the unreported counts. Metropolis mixes slowly, hence the extra draws
-FIT_KWARGS_UNDER_REPORTING = FIT_KWARGS | {"draws": 4000, "target_accept": 0.9}
+# and Metropolis for the unreported counts. Metropolis mixes slowly, hence the extra draws,
+# thinned to as many as the other specs keep at little cost, as the counts' draws are highly
+# correlated. NUTS diverged occasionally at lower target acceptances
+FIT_KWARGS_UNDER_REPORTING = FIT_KWARGS | {
+    "draws": 12000,
+    "thin": 3,
+    "target_accept": 0.99,
+}
 MODEL_SPECS: dict[str, dict[str, Any]] = {
     "poisson": {
         "model_name": "poisson",
