@@ -7,6 +7,7 @@ from endoutbreakhet.plotting import (
     make_panel_figure,
     plot_densities,
     plot_model_probabilities,
+    plot_model_probabilities_inset,
     plot_risk_incidence_overlay,
     save_figure,
     set_plot_style,
@@ -41,11 +42,26 @@ def make_plots(*, comparison_spec_name):
         "vline_days": [inputs["ert_days"]["arrival"], inputs["ert_days"]["departure"]],
     }
 
-    # The risks fill the rest of the last row
+    # A column per parameter, then the model probabilities and the risks, which fill the rest
+    # of the last row. R_after's densities leave the upper right of its panel empty, so when
+    # it's the last parameter the model probabilities go in a box there instead, labelled as
+    # the next panel, and the risks take the whole last row
+    n_columns = len(param_names)
+    inset_model_probabilities = param_names[-1] == "rep_no_after"
+    labels = [f"{chr(ord('A') + idx)}." for idx in range(n_columns + 2)]
     summary_fig, summary_axes = make_panel_figure(
-        panel_widths=[1] * (len(param_names) + 1) + [None]
+        panel_widths=[
+            *[1] * n_columns,
+            *([] if inset_model_probabilities else [1]),
+            None,
+        ],
+        n_columns=n_columns,
+        labels=(
+            [*labels[:n_columns], labels[-1]] if inset_model_probabilities else labels
+        ),
     )
-    *densities_axes, model_probabilities_ax, risk_ax = summary_axes
+    densities_axes = summary_axes[:n_columns]
+    risk_ax = summary_axes[-1]
     for ax, param_name in zip(densities_axes, param_names, strict=True):
         plot_densities(
             ax=ax,
@@ -55,13 +71,20 @@ def make_plots(*, comparison_spec_name):
             log_x=(param_name == "dispersion"),
             legend=(param_name == "rep_no_before"),
         )
-    plot_model_probabilities(
-        ax=model_probabilities_ax,
-        model_probability_by_model=compute_model_probabilities(
-            log_evidence_by_model=log_evidence_by_model,
-            prior_probability_by_model=None,
-        ),
+    model_probability_by_model = compute_model_probabilities(
+        log_evidence_by_model=log_evidence_by_model, prior_probability_by_model=None
     )
+    if inset_model_probabilities:
+        plot_model_probabilities_inset(
+            ax=densities_axes[-1],
+            model_probability_by_model=model_probability_by_model,
+            label=labels[n_columns],
+        )
+    else:
+        plot_model_probabilities(
+            ax=summary_axes[n_columns],
+            model_probability_by_model=model_probability_by_model,
+        )
     plot_risk_incidence_overlay(
         ax=risk_ax, risk_types=inputs["risk_types"], **risk_overlay_kwargs
     )

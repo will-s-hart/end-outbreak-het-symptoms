@@ -16,6 +16,7 @@ from endoutbreakhet.plotting import (
     plot_fit_gate,
     plot_incidence,
     plot_model_probabilities,
+    plot_model_probabilities_inset,
     plot_risk_incidence_overlay,
     save_figure,
     set_plot_style,
@@ -174,10 +175,29 @@ def test_make_panel_figure_sharey():
         assert bool(ax.get_yticklabels()) == (idx in (0, 3))
 
 
-@pytest.mark.parametrize("width", [0, 4])
-def test_make_panel_figure_raises_for_invalid_width(*, width):
+def test_make_panel_figure_n_columns():
+    fig, axes = make_panel_figure(panel_widths=[1, 1, None], n_columns=2)
+    # Two slots wide, the last panel filling a row of its own below the first two
+    assert fig.get_figwidth() == pytest.approx(
+        make_panel_figure(panel_widths=[1, 1])[0].get_figwidth()
+    )
+    left, right, _, top = _extent_inches(ax=axes[2])
+    assert left == pytest.approx(_extent_inches(ax=axes[0])[0])
+    assert right == pytest.approx(_extent_inches(ax=axes[1])[1])
+    assert top < _extent_inches(ax=axes[0])[2]
+
+
+def test_make_panel_figure_labels():
+    fig, _ = make_panel_figure(panel_widths=[1, 1, 1], labels=["A.", None, "D."])
+    assert [text.get_text() for text in fig.texts] == ["A.", "D."]
+    with pytest.raises(ValueError, match="2 labels for 3 panels"):
+        make_panel_figure(panel_widths=[1, 1, 1], labels=["A.", "B."])
+
+
+@pytest.mark.parametrize(("n_columns", "width"), [(3, 0), (3, 4), (2, 3)])
+def test_make_panel_figure_raises_for_invalid_width(*, n_columns, width):
     with pytest.raises(ValueError, match="Panel widths"):
-        make_panel_figure(panel_widths=[1, width])
+        make_panel_figure(panel_widths=[1, width], n_columns=n_columns)
 
 
 @pytest.mark.parametrize(
@@ -241,7 +261,8 @@ def test_plot_model_probabilities():
         ax=ax, model_probability_by_model={"sse": 0.25, "ssi_so": 0.75}
     )
     fig.canvas.draw()
-    wedges = ax.patches
+    (pie_ax,) = ax.child_axes
+    wedges = pie_ax.patches
     np.testing.assert_allclose(
         [wedge.theta2 - wedge.theta1 for wedge in wedges], [90, 270]
     )
@@ -255,6 +276,35 @@ def test_plot_model_probabilities():
     ]
     assert ax.get_legend().get_title().get_text() == "Model probability"
     assert not ax.get_title()
+    # The legend below the pie, clear of it
+    assert ax.get_legend().get_window_extent().y1 < pie_ax.get_window_extent().y0
+
+
+def test_plot_model_probabilities_inset():
+    fig, (ax,) = make_panel_figure(panel_widths=[1])
+    plot_model_probabilities_inset(
+        ax=ax, model_probability_by_model={"sse": 1.0, "ssi_so": 0.0}, label="C."
+    )
+    fig.canvas.draw()
+    # A framed box in the upper right of the panel, labelled as a panel of its own
+    (box_ax,) = ax.child_axes
+    box_position, position = box_ax.get_position(), ax.get_position()
+    assert box_position.x1 < position.x1 and box_position.y1 < position.y1
+    assert box_position.x0 + box_position.x1 > position.x0 + position.x1
+    assert box_position.y0 + box_position.y1 > position.y0 + position.y1
+    assert all(spine.get_visible() for spine in box_ax.spines.values())
+    assert [text.get_text() for text in box_ax.texts] == ["C."]
+    # The pie over its legend, with edged wedges, so a model of probability 0 still shows
+    (pie_ax,) = box_ax.child_axes
+    assert all(
+        wedge.get_edgecolor() == matplotlib.colors.to_rgba("white")
+        for wedge in pie_ax.patches
+    )
+    assert [text.get_text() for text in box_ax.get_legend().get_texts()] == [
+        "SSE (1.00)",
+        "SSI-SO (0.00)",
+    ]
+    assert box_ax.get_legend().get_window_extent().y1 < pie_ax.get_window_extent().y0
 
 
 def test_plot_fit_gate():

@@ -152,9 +152,10 @@ from several analyses or several runs of one (e.g. overlapping sets of model spe
   a one-liner into a helper just because it repeats.
 - Every `make_plots` calls `plotting.set_plot_style()` first, and every figure comes from
   `plotting.make_panel_figure`, with the `plotting.plot_*` functions drawing onto the axes it
-  returns. Panels sit in a grid three slots wide with axes margins fixed in inches, so a panel
-  spanning several slots lines up with the panels above and below it. Scripts save only these
-  figures, never their panels separately (a single-panel figure is one with a single panel).
+  returns. Panels sit in a grid of slots (three wide unless a figure sets `n_columns`) with
+  axes margins fixed in inches, so a panel spanning several slots lines up with the panels
+  above and below it. Scripts save only these figures, never their panels separately (a
+  single-panel figure is one with a single panel).
 - Figure numbers live only in the Snakefile's `numbered_figure_sources`. Don't put figure
   numbers in scripts, `inputs.py` or their docstrings and comments; they go stale on any
   renumbering.
