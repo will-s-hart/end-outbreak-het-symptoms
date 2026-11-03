@@ -9,24 +9,25 @@ Analysis of the risk of additional cases at the apparent end of an outbreak, acc
 superspreading and symptom-linked infectiousness. A library package drives a Snakemake workflow
 that produces the numerical results and figures.
 
-**Status:** the library (model fitting, risk, evidence, the rolling-fit pipeline and
-plotting), the `delay_distributions` and `model_fits` analysis scripts (the first discretises
-the delay distributions the fits read) and the `delay_distributions_plots`,
-`model_comparison_plots` and `fit_diagnostics_plots` plot scripts exist, each with Snakemake
-rules. Model fitting, risk, evidence and the pipeline support under-reporting with a known
-reporting probability (`reporting_prob`, set per model spec, with 60% and 80% reporting specs
-alongside the complete-reporting ones). Risk covers additional cases, transmission, sustained
-transmission and reported cases (DLO: cases and transmission only), and the pipeline records
-every risk type the model has, with its Monte Carlo SE and R̂. nutpie samples the models with
-only continuous variables (the gamma latents' inverse CDF has a shape gradient of the
-package's own), and PyMC the under-reporting ones, with NUTS for the continuous variables
-and Metropolis for the unreported counts. Each spec takes one of two sets of sampler settings (`FIT_KWARGS` and
-`FIT_KWARGS_UNDER_REPORTING` in `inputs.py`), each fit's chains start from dispersed points,
-and the pipeline saves every day's convergence diagnostics (R̂, bulk/tail ESS, divergences,
-draws at the maximum tree depth). `fit_diagnostics_plots` applies the fit gate's thresholds
-(`FIT_GATE_THRESHOLDS` in `inputs.py`) to the diagnostics, risks and log evidence SEs,
-reporting failures without blocking anything downstream. Keep this file in step as more land:
-describe what exists, not what is planned.
+**Status:** the library (model fitting, risk, evidence, the rolling-fit pipeline and plotting),
+the `delay_distributions` and `model_fits` analysis scripts (the first discretises the delay
+distributions the fits read) and the `model_inputs_plots`, `model_comparison_plots` and
+`fit_diagnostics_plots` plot scripts exist, each with Snakemake rules, and each figure they
+make is copied to a numbered `figures/figure_<n>.<ext>`. Model fitting, risk, evidence and the
+pipeline support under-reporting with a known reporting probability (`reporting_prob`, set per
+model spec, with 60% and 80% reporting specs alongside the complete-reporting ones). Risk
+covers additional cases, transmission, sustained transmission and reported cases (DLO: cases
+and transmission only), and the pipeline records every risk type the model has, with its Monte
+Carlo SE and R̂. nutpie samples the models with only continuous variables (the gamma latents'
+inverse CDF has a shape gradient of the package's own), and PyMC the under-reporting ones, with
+NUTS for the continuous variables and Metropolis for the unreported counts. Each spec takes one
+of two sets of sampler settings (`FIT_KWARGS` and `FIT_KWARGS_UNDER_REPORTING` in `inputs.py`),
+each fit's chains start from dispersed points, and the pipeline saves every day's convergence
+diagnostics (R̂, bulk/tail ESS, divergences, draws at the maximum tree depth).
+`fit_diagnostics_plots` applies the fit gate's thresholds (`FIT_GATE_THRESHOLDS` in
+`inputs.py`) to the diagnostics, risks and log evidence SEs, reporting failures without
+blocking anything downstream. Keep this file in step as more land: describe what exists, not
+what is planned.
 
 ## Layout
 
@@ -107,10 +108,14 @@ commands** — wire them in as rules.
   nothing), but an input newer than an output still counts as unchanged if its checksum
   matches the one recorded in the output's metadata (inputs under 1 MB). So a touch or a
   checkout reruns nothing; a content change does.
-- Rules with seconds of compute, such as `delay_distributions`, go in `localrules`, so on a
-  cluster they don't queue for a slot.
-- Add each analysis's output paths to the `results_paths` / `figure_paths` aggregates, which
+- Rules with seconds of compute, such as `delay_distributions`, go in `localrules` (or take
+  `localrule: True`, for rules defined in a loop), so on a cluster they don't queue for a slot.
+- Add each analysis's output paths to the `results_paths` / `plot_fig_paths` aggregates, which
   are built before `rule all` (Snakemake resolves a rule's inputs when it is defined).
+- Every figure a plot rule makes gets a number in `numbered_figure_sources` (2 onwards in the
+  paper, S1 onwards in its supplement, A1 onwards for figures in neither), and a
+  `numbered_figure_<n>` rule copies it to `figures/figure_<n>.<ext>`. The Snakefile raises
+  while parsing if a figure is unnumbered or numbered twice.
 
 ## Analysis vs plotting convention
 
@@ -137,12 +142,18 @@ from several analyses or several runs of one (e.g. overlapping sets of model spe
   other function is `_private` and sits below it. A helper that is a general reusable task (not
   one analysis's step) and is used across scripts belongs in the package instead. Don't factor
   a one-liner into a helper just because it repeats.
-- If paper figures are compiled from per-analysis panels, figure numbers live only in that
-  compile script and the Snakefile. Don't put figure or panel numbers in other scripts'
-  docstrings or comments; they go stale on any renumbering.
+- Every `make_plots` calls `plotting.set_plot_style()` first, and every figure comes from
+  `plotting.make_panel_figure`, with the `plotting.plot_*` functions drawing onto the axes it
+  returns. Panels sit in a grid three slots wide with axes margins fixed in inches, so a panel
+  spanning several slots lines up with the panels above and below it. Scripts save only these
+  figures, never their panels separately (a single-panel figure is one with a single panel).
+- Figure numbers live only in the Snakefile's `numbered_figure_sources`. Don't put figure
+  numbers in scripts, `inputs.py` or their docstrings and comments; they go stale on any
+  renumbering.
 
 To add an analysis or plot script: write it, add its `get_inputs_<name>()` and path getter to
-`inputs.py`, and add its rule to the Snakefile (for an analysis, with the `as_param` param).
+`inputs.py`, and add its rule to the Snakefile (for an analysis, with the `as_param` param; for
+a plot script, numbering each of its figures in `numbered_figure_sources`).
 
 ## Tests
 

@@ -5,22 +5,30 @@ import numpy as np
 import pandas as pd
 import pytest
 import scipy.stats
+import seaborn as sns
 
 from endoutbreakhet import DelayDistribution
 from endoutbreakhet.plotting import (
     _month_start_x_axis,
+    make_panel_figure,
     plot_delay_distribution,
     plot_densities,
     plot_fit_gate,
+    plot_incidence,
     plot_model_probabilities,
     plot_risk_incidence_overlay,
     save_figure,
+    set_plot_style,
 )
 from endoutbreakhet.utils import parse_lognormal_prior
 
 # Days since this date that fall on month starts: 1 May (27), 1 Jun (58), 1 Jul (88), ...,
 # 1 Dec (241), 1 Jan 2019 (272), 1 Feb 2019 (303)
 _FIRST_CASE_DATE = pd.Timestamp("2018-04-04")
+
+
+# Seaborn's colorblind palette's blue, orange, green and red
+_BLUE, _ORANGE, _GREEN, _RED = sns.color_palette("colorblind")[:4]
 
 
 @pytest.fixture(autouse=True)
@@ -73,26 +81,126 @@ def risk_df_by_model():
     }
 
 
+def test_set_plot_style():
+    set_plot_style()
+    assert plt.rcParams["axes.prop_cycle"].by_key()["color"] == list(
+        sns.color_palette("colorblind")
+    )
+    assert plt.rcParams["svg.fonttype"] == "none"
+    assert not plt.rcParams["axes.spines.top"]
+
+
+def _extent_inches(*, ax):
+    # (left, right, bottom, top) of the axes, in inches from the figure's bottom-left
+    fig = ax.get_figure(root=True)
+    position = ax.get_position()
+    return np.array(
+        [
+            position.x0 * fig.get_figwidth(),
+            position.x1 * fig.get_figwidth(),
+            position.y0 * fig.get_figheight(),
+            position.y1 * fig.get_figheight(),
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("panel_widths", "spanned_axes_idxs"),
+    [
+        # A panel filling a row of its own spans the three above it
+        ([1, 1, 1, None], (0, 2)),
+        # One filling the rest of a row spans the two above it
+        ([1, 1, 1, 1, None], (1, 2)),
+        ([1, 1, 1, 1, 2], (1, 2)),
+    ],
+)
+def test_make_panel_figure_aligns_spanning_panels(*, panel_widths, spanned_axes_idxs):
+    fig, axes = make_panel_figure(panel_widths=panel_widths)
+    assert len(axes) == len(panel_widths)
+    assert fig.axes == axes
+    first_idx, last_idx = spanned_axes_idxs
+    left, right, bottom, top = _extent_inches(ax=axes[-1])
+    assert left == pytest.approx(_extent_inches(ax=axes[first_idx])[0])
+    assert right == pytest.approx(_extent_inches(ax=axes[last_idx])[1])
+    # In the second row, as tall as the first
+    first_row_extent = _extent_inches(ax=axes[0])
+    assert top < first_row_extent[2]
+    assert top - bottom == pytest.approx(first_row_extent[3] - first_row_extent[2])
+    assert [text.get_text() for text in fig.texts] == [
+        f"{chr(ord('A') + idx)}." for idx in range(len(panel_widths))
+    ]
+
+
+def test_make_panel_figure_sizes_by_slots():
+    single_fig, (single_ax,) = make_panel_figure(panel_widths=[1])
+    single_width, single_height = single_fig.get_size_inches()
+    slot_width = make_panel_figure(panel_widths=[1, 1])[0].get_figwidth() - single_width
+    # A panel too wide for the rest of the row starts a new one, and the figure is as wide
+    # as its widest row
+    fig, axes = make_panel_figure(panel_widths=[2, 2])
+    np.testing.assert_allclose(
+        fig.get_size_inches(), [single_width + slot_width, 2 * single_height]
+    )
+    # Panels a slot wider by a slot's width, with the same margins
+    single_extent = _extent_inches(ax=single_ax)
+    np.testing.assert_allclose(
+        _extent_inches(ax=axes[1]), single_extent + [0, slot_width, 0, 0]
+    )
+    # Only labelled with several panels
+    assert not single_fig.texts
+
+
+def test_make_panel_figure_gutters_shift_slots():
+    fig, (ax,) = make_panel_figure(panel_widths=[1])
+    gutters = {"left": 2, "right": 0.5, "bottom": 1, "top": 0.25}
+    gutter_fig, (gutter_ax,) = make_panel_figure(panel_widths=[1], gutters=gutters)
+    np.testing.assert_allclose(
+        gutter_fig.get_size_inches(), fig.get_size_inches() + [2.5, 1.25]
+    )
+    np.testing.assert_allclose(
+        _extent_inches(ax=gutter_ax), _extent_inches(ax=ax) + [2, 2, 1, 1]
+    )
+
+
+def test_make_panel_figure_sharey():
+    fig, axes = make_panel_figure(panel_widths=[1, 1, 1, 1], sharey=True)
+    for ax in axes[1:]:
+        ax.set_yticks([0, 1], labels=["a", "b"])
+    fig.canvas.draw()
+    # Tick labels only on the panels starting a row (get_yticklabels leaves out hidden
+    # labels)
+    for idx, ax in enumerate(axes):
+        assert ax.get_shared_y_axes().joined(axes[0], ax)
+        assert bool(ax.get_yticklabels()) == (idx in (0, 3))
+
+
+@pytest.mark.parametrize("width", [0, 4])
+def test_make_panel_figure_raises_for_invalid_width(*, width):
+    with pytest.raises(ValueError, match="Panel widths"):
+        make_panel_figure(panel_widths=[1, width])
+
+
 @pytest.mark.parametrize(
     ("param_name", "log_x", "expected_labels"),
     [
-        ("rep_no_before", False, ["Poisson", "SSE", "prior"]),
+        ("rep_no_before", False, ["Poisson", "SSE", "Prior"]),
         # The Poisson model has no dispersion, so is left out
-        ("dispersion", True, ["SSE", "prior"]),
+        ("dispersion", True, ["SSE", "Prior"]),
     ],
 )
 def test_plot_densities(
     *, posterior_df_by_model, toy_inputs, param_name, log_x, expected_labels
 ):
     priors = toy_inputs["priors"]
-    fig = plot_densities(
+    fig, (ax,) = make_panel_figure(panel_widths=[1])
+    plot_densities(
+        ax=ax,
         posterior_df_by_model=posterior_df_by_model,
         priors=priors,
         param_name=param_name,
         log_x=log_x,
     )
     fig.canvas.draw()
-    (ax,) = fig.axes
     lines = ax.get_lines()
     assert [line.get_label() for line in lines] == expected_labels
     assert [text.get_text() for text in ax.get_legend().get_texts()] == expected_labels
@@ -116,40 +224,48 @@ def test_plot_densities(
 
 
 def test_plot_densities_without_legend(*, posterior_df_by_model, toy_inputs):
-    fig = plot_densities(
+    _, (ax,) = make_panel_figure(panel_widths=[1])
+    plot_densities(
+        ax=ax,
         posterior_df_by_model=posterior_df_by_model,
         priors=toy_inputs["priors"],
         param_name="rep_no_after",
         legend=False,
     )
-    assert fig.axes[0].get_legend() is None
+    assert ax.get_legend() is None
 
 
 def test_plot_model_probabilities():
-    fig = plot_model_probabilities(
-        model_probability_by_model={"sse": 0.25, "ssi_so": 0.75}
+    fig, (ax,) = make_panel_figure(panel_widths=[1])
+    plot_model_probabilities(
+        ax=ax, model_probability_by_model={"sse": 0.25, "ssi_so": 0.75}
     )
     fig.canvas.draw()
-    (ax,) = fig.axes
     wedges = ax.patches
     np.testing.assert_allclose(
         [wedge.theta2 - wedge.theta1 for wedge in wedges], [90, 270]
     )
     assert [wedge.get_facecolor() for wedge in wedges] == [
-        matplotlib.colors.to_rgba("tab:blue"),
-        matplotlib.colors.to_rgba("tab:orange"),
+        matplotlib.colors.to_rgba(_BLUE),
+        matplotlib.colors.to_rgba(_ORANGE),
     ]
     assert [text.get_text() for text in ax.get_legend().get_texts()] == [
         "SSE (0.25)",
         "SSI-SO (0.75)",
     ]
+    assert ax.get_legend().get_title().get_text() == "Model probability"
+    assert not ax.get_title()
 
 
 def test_plot_fit_gate():
     # Two specs over three days, with the second spec's fit failing on day 11
     statuses = np.array([["pass", "pass", "unassessed"], ["pass", "fail", "pass"]])
     criteria = ("rhat", "ess_bulk", "ess_tail", "divergences", "tree_depth", "risk")
-    fig = plot_fit_gate(
+    fig, criterion_axes = make_panel_figure(
+        panel_widths=[1] * len(criteria), sharey=True, gutters={"bottom": 1}
+    )
+    plot_fit_gate(
+        axes=criterion_axes,
         status_by_criterion=dict.fromkeys(criteria, statuses),
         fit_status=np.array([["pass", "pass", "pass"], ["pass", "fail", "pass"]]),
         evidence_status=["pass", "fail"],
@@ -157,8 +273,10 @@ def test_plot_fit_gate():
         days=np.array([10, 11, 12]),
         comparison_day=11,
     )
-    *criterion_axes, evidence_ax = fig.axes
-    colors = {"pass": "tab:green", "fail": "tab:red", "unassessed": "lightgray"}
+    # Inset in the last panel's right margin
+    (evidence_ax,) = criterion_axes[-1].child_axes
+    assert evidence_ax.get_position().x0 > criterion_axes[-1].get_position().x1
+    colors = {"pass": _GREEN, "fail": _RED, "unassessed": "lightgray"}
 
     def _cell_colors(*, ax):
         (image,) = ax.get_images()
@@ -212,10 +330,32 @@ def test_plot_fit_gate():
     ]
 
 
+def test_plot_incidence():
+    reported_incidence_vec = np.arange(60) % 4
+    _, (ax,) = make_panel_figure(panel_widths=[3])
+    plot_incidence(
+        ax=ax,
+        reported_incidence_vec=reported_incidence_vec,
+        first_case_date=_FIRST_CASE_DATE,
+        ert_days={"arrival": 20, "departure": 50},
+    )
+    bars = ax.patches
+    np.testing.assert_allclose(
+        [bar.get_x() + bar.get_width() / 2 for bar in bars], np.arange(60)
+    )
+    np.testing.assert_array_equal(
+        [bar.get_height() for bar in bars], reported_incidence_vec
+    )
+    assert [line.get_xdata()[0] for line in ax.get_lines()] == [20, 50]
+    assert [text.get_text() for text in ax.texts] == ["ERT arrival", "ERT departure"]
+    # The months containing the days since the first case: April to June
+    assert ax.get_xlim() == (-3, 88)
+
+
 def test_plot_delay_distribution():
     delay = DelayDistribution(prob=np.array([0.2, 0.4, 0.3, 0.1]), first_lag=0)
-    fig = plot_delay_distribution(delay=delay, delay_name="tost", max_lag=10)
-    (ax,) = fig.axes
+    _, (ax,) = make_panel_figure(panel_widths=[1])
+    plot_delay_distribution(ax=ax, delay=delay, delay_name="tost", max_lag=10)
     bars = ax.patches
     np.testing.assert_allclose(
         [bar.get_x() + bar.get_width() / 2 for bar in bars], delay.lags
@@ -230,7 +370,9 @@ def test_plot_delay_distribution():
 
 def test_plot_delay_distribution_with_overlay():
     overlay = DelayDistribution(prob=np.array([0.25, 0.45, 0.2, 0.1]), first_lag=1)
-    fig = plot_delay_distribution(
+    _, (ax,) = make_panel_figure(panel_widths=[1])
+    plot_delay_distribution(
+        ax=ax,
         delay=DelayDistribution(prob=np.array([0.2, 0.5, 0.3]), first_lag=1),
         delay_name="serial_interval",
         max_lag=10,
@@ -238,7 +380,6 @@ def test_plot_delay_distribution_with_overlay():
         overlay=overlay,
         overlay_label="SO models (implied)",
     )
-    (ax,) = fig.axes
     (line,) = ax.get_lines()
     np.testing.assert_array_equal(line.get_xdata(), overlay.lags)
     np.testing.assert_array_equal(line.get_ydata(), overlay.prob)
@@ -250,18 +391,20 @@ def test_plot_delay_distribution_with_overlay():
 
 @pytest.mark.parametrize(
     ("risk_types", "expected_lines", "expected_ylabel"),
+    # Each line's model, risk type, label and style, which is solid for the panel's first
+    # risk type and dashed for its second, whichever they are
     [
         (
             ("cases",),
-            [("sse", "cases", "SSE"), ("sse_so", "cases", "SSE-SO")],
+            [("sse", "cases", "SSE", "-"), ("sse_so", "cases", "SSE-SO", "-")],
             "Risk of additional cases",
         ),
         (
             ("cases", "transmission"),
             [
-                ("sse", "cases", "SSE"),
-                ("sse_so", "cases", "SSE-SO (cases)"),
-                ("sse_so", "transmission", "SSE-SO (transmission)"),
+                ("sse", "cases", "SSE", "-"),
+                ("sse_so", "cases", "SSE-SO (cases)", "-"),
+                ("sse_so", "transmission", "SSE-SO (transmission)", "--"),
             ],
             "Risk",
         ),
@@ -269,23 +412,26 @@ def test_plot_delay_distribution_with_overlay():
         # cases, so get their own curves
         (
             ("sustained",),
-            [("sse", "sustained", "SSE"), ("sse_so", "sustained", "SSE-SO")],
+            [("sse", "sustained", "SSE", "-"), ("sse_so", "sustained", "SSE-SO", "-")],
             "Risk of sustained transmission",
         ),
         (
             ("cases", "reports"),
             [
-                ("sse", "cases", "SSE (cases)"),
-                ("sse", "reports", "SSE (reports)"),
-                ("sse_so", "cases", "SSE-SO (cases)"),
-                ("sse_so", "reports", "SSE-SO (reports)"),
+                ("sse", "cases", "SSE (cases)", "-"),
+                ("sse", "reports", "SSE (reports)", "--"),
+                ("sse_so", "cases", "SSE-SO (cases)", "-"),
+                ("sse_so", "reports", "SSE-SO (reports)", "--"),
             ],
             "Risk",
         ),
         # Without the risk of cases alongside, naive models show that of transmission
         (
             ("transmission",),
-            [("sse", "transmission", "SSE"), ("sse_so", "transmission", "SSE-SO")],
+            [
+                ("sse", "transmission", "SSE", "-"),
+                ("sse_so", "transmission", "SSE-SO", "-"),
+            ],
             "Risk of additional transmission",
         ),
     ],
@@ -295,7 +441,9 @@ def test_plot_risk_incidence_overlay(
 ):
     reported_incidence_vec = np.arange(60) % 4
     vline_days = [34, 70]
-    fig = plot_risk_incidence_overlay(
+    fig, (ax,) = make_panel_figure(panel_widths=[2])
+    plot_risk_incidence_overlay(
+        ax=ax,
         risk_df_by_model=risk_df_by_model,
         reported_incidence_vec=reported_incidence_vec,
         first_case_date=_FIRST_CASE_DATE,
@@ -303,31 +451,29 @@ def test_plot_risk_incidence_overlay(
         vline_days=vline_days,
     )
     fig.canvas.draw()
-    ax, twin_ax = fig.axes
+    _, twin_ax = fig.axes
 
     *risk_lines, vline_before, vline_after = ax.get_lines()
     assert len(risk_lines) == len(expected_lines)
-    for line, (model_name, risk_type, label) in zip(
+    for line, (model_name, risk_type, label, linestyle) in zip(
         risk_lines, expected_lines, strict=True
     ):
         risk_df = risk_df_by_model[model_name]
         np.testing.assert_array_equal(line.get_xdata(), risk_df["day"])
         np.testing.assert_array_equal(line.get_ydata(), risk_df[f"risk_{risk_type}"])
-        assert (
-            line.get_linestyle()
-            == {"cases": "-", "transmission": "--", "sustained": ":", "reports": "-."}[
-                risk_type
-            ]
-        )
+        assert line.get_linestyle() == linestyle
         assert line.get_label() == label
+        # Unclipped, so curves at a risk of 0 or 1 show in full
+        assert not line.get_clip_on()
     assert [text.get_text() for text in ax.get_legend().get_texts()] == [
-        label for _, _, label in expected_lines
+        label for _, _, label, _ in expected_lines
     ]
     assert [vline_before.get_xdata()[0], vline_after.get_xdata()[0]] == vline_days
     assert ax.get_ylabel() == expected_ylabel
 
     # Incidence bars in the same days-since-first-case coordinates as the risks, with the
-    # x axis covering the months of the risk days only
+    # x axis from the start of the first risk day's month to the last risk day, and risks
+    # from 0 to 1
     bars = twin_ax.patches
     np.testing.assert_allclose(
         [bar.get_x() + bar.get_width() / 2 for bar in bars], np.arange(60)
@@ -335,7 +481,8 @@ def test_plot_risk_incidence_overlay(
     np.testing.assert_array_equal(
         [bar.get_height() for bar in bars], reported_incidence_vec
     )
-    assert ax.get_xlim() == (27, 88)
+    assert ax.get_xlim() == (27, 79)
+    assert ax.get_ylim() == (0, 1)
 
 
 @pytest.mark.parametrize(

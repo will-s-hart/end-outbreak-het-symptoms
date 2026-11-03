@@ -91,6 +91,9 @@ FIT_GATE_THRESHOLDS = {
 FIG_EXTENSIONS = ("svg", "png")
 DATA_PATH = pathlib.Path("data/equateur_2018_onsets.csv")
 
+# Each comparison's summary figure shows the densities of param_names, the model
+# probabilities and the risks of risk_types, and each of extra_risk_panels (a tuple of risk
+# types) gets a figure of its own
 COMPARISON_SPECS: dict[str, dict[str, Any]] = {
     "naive_models_fixed_dispersion": {
         "model_spec_names": [
@@ -98,7 +101,8 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "sse_fixed_dispersion",
             "ssi_fixed_dispersion",
         ],
-        "risk_panels": (("cases",),),
+        "risk_types": ("cases",),
+        "extra_risk_panels": (),
         "param_names": ("rep_no_before", "rep_no_after"),
     },
     "naive_models_estimated_dispersion": {
@@ -107,7 +111,8 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "sse_estimated_dispersion",
             "ssi_estimated_dispersion",
         ],
-        "risk_panels": (("cases",),),
+        "risk_types": ("cases",),
+        "extra_risk_panels": (),
         "param_names": ("rep_no_before", "rep_no_after", "dispersion"),
     },
     "naive_vs_so_fixed_dispersion": {
@@ -117,7 +122,8 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "sse_so_fixed_dispersion",
             "ssi_so_fixed_dispersion",
         ],
-        "risk_panels": (("cases", "transmission"), ("sustained",)),
+        "risk_types": ("cases", "transmission"),
+        "extra_risk_panels": (("sustained",),),
         "param_names": ("rep_no_before", "rep_no_after"),
     },
     "naive_vs_so_estimated_dispersion": {
@@ -127,7 +133,8 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "sse_so_estimated_dispersion",
             "ssi_so_estimated_dispersion",
         ],
-        "risk_panels": (("cases", "transmission"),),
+        "risk_types": ("cases", "transmission"),
+        "extra_risk_panels": (),
         "param_names": ("rep_no_before", "rep_no_after", "dispersion"),
     },
     "poisson_vs_superspreading": {
@@ -137,7 +144,8 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "ssi_fixed_dispersion",
             "ssi_so_fixed_dispersion",
         ],
-        "risk_panels": (("cases", "transmission"),),
+        "risk_types": ("cases", "transmission"),
+        "extra_risk_panels": (),
         "param_names": ("rep_no_before", "rep_no_after"),
     },
     "naive_vs_so_60_pc_reporting": {
@@ -147,7 +155,8 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "sse_so_60_pc_reporting",
             "ssi_so_60_pc_reporting",
         ],
-        "risk_panels": (("cases", "transmission"),),
+        "risk_types": ("cases", "transmission"),
+        "extra_risk_panels": (),
         "param_names": ("rep_no_before", "rep_no_after"),
     },
     "naive_vs_so_80_pc_reporting": {
@@ -157,7 +166,8 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "sse_so_80_pc_reporting",
             "ssi_so_80_pc_reporting",
         ],
-        "risk_panels": (("cases", "transmission"), ("reports",)),
+        "risk_types": ("cases", "transmission"),
+        "extra_risk_panels": (("cases", "reports"),),
         "param_names": ("rep_no_before", "rep_no_after"),
     },
 }
@@ -207,13 +217,14 @@ def get_inputs_model_fits(*, model_spec_name):
     }
 
 
-def get_inputs_delay_distributions_plots():
+def get_inputs_model_inputs_plots():
     return {
+        **_get_shared_inputs(),
         "delay_distributions_results_paths": get_results_paths_delay_distributions(),
-        # Shared by the figures so they can be compared, and past the 99th percentile of
+        # Shared by the panels so they can be compared, and past the 99th percentile of
         # every delay
         "max_plot_lag": 50,
-        "fig_paths": get_fig_paths_delay_distributions_plots(),
+        "fig_paths": get_fig_paths_model_inputs_plots(),
     }
 
 
@@ -251,7 +262,8 @@ def get_inputs_model_comparison_plots(*, comparison_spec_name):
         "results_paths_by_model": results_paths_by_model,
         "priors": priors,
         "param_names": comparison_spec["param_names"],
-        "risk_panels": comparison_spec["risk_panels"],
+        "risk_types": comparison_spec["risk_types"],
+        "extra_risk_panels": comparison_spec["extra_risk_panels"],
         "fig_paths": get_fig_paths_model_comparison_plots(
             comparison_spec_name=comparison_spec_name
         ),
@@ -304,13 +316,10 @@ def get_results_paths_model_fits(*, model_spec_name):
     }
 
 
-def get_fig_paths_delay_distributions_plots():
-    # One path per file format for each figure
-    fig_dir = pathlib.Path("figures/delay_distributions")
-    return {
-        fig_name: [fig_dir / f"{fig_name}.{ext}" for ext in FIG_EXTENSIONS]
-        for fig_name in ("serial_interval", "inc_period", "tost")
-    }
+def get_fig_paths_model_inputs_plots():
+    # One path per file format for the figure
+    fig_dir = pathlib.Path("figures/model_inputs")
+    return {"summary": [fig_dir / f"summary.{ext}" for ext in FIG_EXTENSIONS]}
 
 
 def get_fig_paths_model_comparison_plots(*, comparison_spec_name):
@@ -318,11 +327,10 @@ def get_fig_paths_model_comparison_plots(*, comparison_spec_name):
     fig_dir = pathlib.Path("figures/model_comparison") / comparison_spec_name
     comparison_spec = COMPARISON_SPECS[comparison_spec_name]
     fig_names = [
-        *(f"densities_{param_name}" for param_name in comparison_spec["param_names"]),
-        "model_probabilities",
+        "summary",
         *(
-            f"risk_incidence_overlay_{'_'.join(risk_types)}"
-            for risk_types in comparison_spec["risk_panels"]
+            f"risk_{'_'.join(risk_types)}"
+            for risk_types in comparison_spec["extra_risk_panels"]
         ),
     ]
     return {
@@ -335,6 +343,14 @@ def get_fig_paths_fit_diagnostics_plots():
     # One path per file format for the figure
     fig_dir = pathlib.Path("figures/fit_diagnostics")
     return {"gate": [fig_dir / f"gate.{ext}" for ext in FIG_EXTENSIONS]}
+
+
+def get_fig_paths_numbered(*, figure_number):
+    # One path per file format for the numbered copy of a figure
+    return [
+        pathlib.Path("figures") / f"figure_{figure_number}.{ext}"
+        for ext in FIG_EXTENSIONS
+    ]
 
 
 def _get_shared_inputs():

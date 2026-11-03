@@ -12,11 +12,12 @@ from scripts.inputs import (
     FIT_KWARGS,
     FIT_KWARGS_UNDER_REPORTING,
     MODEL_SPECS,
+    get_fig_paths_numbered,
     get_inputs_delay_distributions,
-    get_inputs_delay_distributions_plots,
     get_inputs_fit_diagnostics_plots,
     get_inputs_model_comparison_plots,
     get_inputs_model_fits,
+    get_inputs_model_inputs_plots,
     get_results_paths_delay_distributions,
 )
 from scripts.snakemake_utils import as_param
@@ -51,16 +52,16 @@ def test_comparison_specs_valid(*, comparison_spec_name):
         for model_spec_name in comparison_spec["model_spec_names"]
     ]
     assert len(set(model_names)) == len(model_names)
-    # A tuple of non-empty tuples (a missing trailing comma would leave a bare string), of
-    # risk types every model in the comparison records
-    risk_panels = comparison_spec["risk_panels"]
-    assert isinstance(risk_panels, tuple) and risk_panels
+    # Non-empty tuples (a missing trailing comma would leave a bare string) of risk types
+    # every model in the comparison records, for the summary figure and each extra panel
+    extra_risk_panels = comparison_spec["extra_risk_panels"]
+    assert isinstance(extra_risk_panels, tuple)
     recorded_risk_types = (
         {"cases", "transmission"}
         if "dlo" in model_names
         else {"cases", "transmission", "sustained", "reports"}
     )
-    for risk_types in risk_panels:
+    for risk_types in (comparison_spec["risk_types"], *extra_risk_panels):
         assert isinstance(risk_types, tuple) and risk_types
         assert set(risk_types) <= recorded_risk_types
     assert isinstance(comparison_spec["param_names"], tuple)
@@ -86,11 +87,10 @@ def test_get_inputs_model_comparison_plots(*, comparison_spec_name, monkeypatch)
 
     fig_paths = inputs["fig_paths"]
     assert set(fig_paths) == {
-        *(f"densities_{param_name}" for param_name in comparison_spec["param_names"]),
-        "model_probabilities",
+        "summary",
         *(
-            f"risk_incidence_overlay_{'_'.join(risk_types)}"
-            for risk_types in comparison_spec["risk_panels"]
+            f"risk_{'_'.join(risk_types)}"
+            for risk_types in comparison_spec["extra_risk_panels"]
         ),
     }
     for fig_name, paths in fig_paths.items():
@@ -110,7 +110,8 @@ def test_get_inputs_model_comparison_plots_raises_for_conflicting_priors(
         "conflicting_priors",
         {
             "model_spec_names": ["sse_fixed_dispersion", "ssi_estimated_dispersion"],
-            "risk_panels": (("cases",),),
+            "risk_types": ("cases",),
+            "extra_risk_panels": (),
             "param_names": ("rep_no_before", "dispersion"),
         },
     )
@@ -125,20 +126,29 @@ def test_get_inputs_delay_distributions():
     as_param(inputs=inputs)
 
 
-def test_get_inputs_delay_distributions_plots():
-    inputs = get_inputs_delay_distributions_plots()
-    # Reads the results where the analysis writes them, with a figure for each
+def test_get_inputs_model_inputs_plots(*, monkeypatch):
+    # Only the paths are checked, so skip loading the data
+    monkeypatch.setattr(scripts.inputs, "_get_shared_inputs", dict)
+    inputs = get_inputs_model_inputs_plots()
+    # Reads the results where the analysis writes them
     assert (
         inputs["delay_distributions_results_paths"]
         == get_results_paths_delay_distributions()
     )
     fig_paths = inputs["fig_paths"]
-    assert fig_paths.keys() == inputs["delay_distributions_results_paths"].keys()
-    for fig_name, paths in fig_paths.items():
-        assert [path.suffix for path in paths] == [f".{ext}" for ext in FIG_EXTENSIONS]
-        for path in paths:
-            assert path.parent == pathlib.Path("figures/delay_distributions")
-            assert path.stem == fig_name
+    assert list(fig_paths) == ["summary"]
+    assert [path.suffix for path in fig_paths["summary"]] == [
+        f".{ext}" for ext in FIG_EXTENSIONS
+    ]
+    for path in fig_paths["summary"]:
+        assert path.parent == pathlib.Path("figures/model_inputs")
+        assert path.stem == "summary"
+
+
+def test_get_fig_paths_numbered():
+    assert get_fig_paths_numbered(figure_number="S1") == [
+        pathlib.Path(f"figures/figure_S1.{ext}") for ext in FIG_EXTENSIONS
+    ]
 
 
 def test_get_inputs_model_fits_reads_delay_distributions_results(*, monkeypatch):

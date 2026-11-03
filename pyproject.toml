@@ -25,6 +25,7 @@ pytensor = "*"
 scipy = "*"
 tqdm = "*"
 xarray = "*"
+seaborn = ">=0.13.2,<0.14"
 
 [tool.pixi.pypi-dependencies]
 endoutbreakhet = { path = ".", editable = true }

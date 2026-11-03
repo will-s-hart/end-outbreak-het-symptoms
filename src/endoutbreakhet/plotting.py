@@ -4,8 +4,42 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.stats
+import seaborn as sns
 
 from endoutbreakhet.utils import parse_lognormal_prior
+
+# Figures are panels in a grid of slots, each panel spanning one or more slots of a row. Axes
+# margins within the slots are in inches rather than fractions of the figure, so a panel's
+# axes line up with those of the panels in the same slots above and below it, whatever its
+# width. The figure has a margin of its own on the right, for a twin y axis on a panel in the
+# last column
+_N_SLOT_COLUMNS = 3
+_SLOT_SIZE = (6.7, 6.5)
+_AXES_MARGINS = {"left": 1.0, "right": 0.3, "bottom": 0.8, "top": 0.4}
+_FIGURE_RIGHT_MARGIN = 0.6
+# From the top-left corner of a panel's first slot to the start of its label's baseline
+_PANEL_LABEL_OFFSET = (0.07, 0.28)
+_PANEL_LABEL_SIZE = 20
+
+# Seaborn's colorblind palette, by hue
+_COLORS = dict(
+    zip(
+        (
+            "blue",
+            "orange",
+            "green",
+            "red",
+            "purple",
+            "brown",
+            "pink",
+            "gray",
+            "yellow",
+            "cyan",
+        ),
+        sns.color_palette("colorblind"),
+        strict=True,
+    )
+)
 
 _PARAM_LABELS = {
     "rep_no_before": r"$R_\mathrm{before}$",
@@ -15,20 +49,16 @@ _PARAM_LABELS = {
 
 _MODEL_STYLES = {
     "poisson": {"label": "Poisson", "color": "black"},
-    "sse": {"label": "SSE", "color": "tab:blue"},
-    "ssi": {"label": "SSI", "color": "tab:green"},
-    "dlo": {"label": "DLO", "color": "tab:red"},
-    "sse_so": {"label": "SSE-SO", "color": "tab:pink"},
-    "ssi_so": {"label": "SSI-SO", "color": "tab:orange"},
-    "poisson_so": {"label": "Poisson-SO", "color": "tab:gray"},
+    "sse": {"label": "SSE", "color": _COLORS["blue"]},
+    "ssi": {"label": "SSI", "color": _COLORS["green"]},
+    "dlo": {"label": "DLO", "color": _COLORS["red"]},
+    "sse_so": {"label": "SSE-SO", "color": _COLORS["purple"]},
+    "ssi_so": {"label": "SSI-SO", "color": _COLORS["orange"]},
+    "poisson_so": {"label": "Poisson-SO", "color": _COLORS["gray"]},
 }
 
-_RISK_TYPE_LINESTYLES = {
-    "cases": "-",
-    "transmission": "--",
-    "sustained": ":",
-    "reports": "-.",
-}
+# By the risk type's place among those in a panel, so the first is always solid
+_RISK_TYPE_LINESTYLES = ("-", "--", ":", "-.")
 
 _RISK_TYPE_YLABELS = {
     "cases": "Risk of additional cases",
@@ -38,8 +68,8 @@ _RISK_TYPE_YLABELS = {
 }
 
 _GATE_STATUS_COLORS = {
-    "pass": "tab:green",
-    "fail": "tab:red",
+    "pass": _COLORS["green"],
+    "fail": _COLORS["red"],
     "unassessed": "lightgray",
 }
 
@@ -59,11 +89,88 @@ _DELAY_XLABELS = {
 }
 
 
-def plot_densities(
-    *, posterior_df_by_model, priors, param_name, log_x=False, legend=True
-):
-    fig, ax = plt.subplots()
+def set_plot_style():
+    # The style every figure shares, so call it before making any
+    plt.rcParams.update(
+        {
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "axes.prop_cycle": plt.cycler(color=list(_COLORS.values())),
+            "savefig.transparent": True,
+            # Text stays editable in SVGs
+            "svg.fonttype": "none",
+            "axes.titlesize": 16,
+            "axes.labelsize": 16,
+            "lines.linewidth": 2,
+            "lines.markersize": 8,
+            "xtick.labelsize": 16,
+            "ytick.labelsize": 16,
+            # Clears x tick labels from y tick labels where axes meet at a labelled corner,
+            # as on the risk panels
+            "xtick.major.pad": 6,
+            "legend.fontsize": 14,
+            "legend.title_fontsize": 14,
+            "font.family": "sans-serif",
+            "font.sans-serif": "Arial",
+        }
+    )
 
+
+def make_panel_figure(*, panel_widths, sharey=False, gutters=None):
+    # A figure of panels filling rows of slots in order, and the panels' axes. Each panel
+    # spans its width in slots or, for a width of None, the rest of its row (a whole row if
+    # it starts one). Panels are labelled "A.", "B.", ... unless there is just one. With
+    # sharey, the panels share the first's y axis, labelled only on panels starting a row.
+    # gutters adds space (in inches, by side) around the slots for figure-level decorations
+    gutters = dict.fromkeys(("left", "right", "bottom", "top"), 0) | (gutters or {})
+    rows = _pack_rows(panel_widths=panel_widths)
+    slot_width, slot_height = _SLOT_SIZE
+    fig_width = (
+        gutters["left"]
+        + max(sum(width for _, width in row) for row in rows) * slot_width
+        + _FIGURE_RIGHT_MARGIN
+        + gutters["right"]
+    )
+    fig_height = gutters["top"] + len(rows) * slot_height + gutters["bottom"]
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    axes = []
+    for row_idx, row in enumerate(rows):
+        # In inches from the bottom of the figure, as are the positions below
+        row_top = fig_height - gutters["top"] - row_idx * slot_height
+        for first_slot, width in row:
+            slot_left = gutters["left"] + first_slot * slot_width
+            ax = fig.add_axes(
+                (
+                    (slot_left + _AXES_MARGINS["left"]) / fig_width,
+                    (row_top - slot_height + _AXES_MARGINS["bottom"]) / fig_height,
+                    (
+                        width * slot_width
+                        - _AXES_MARGINS["left"]
+                        - _AXES_MARGINS["right"]
+                    )
+                    / fig_width,
+                    (slot_height - _AXES_MARGINS["bottom"] - _AXES_MARGINS["top"])
+                    / fig_height,
+                ),
+                sharey=axes[0] if sharey and axes else None,
+            )
+            if sharey and first_slot > 0:
+                ax.tick_params(labelleft=False)
+            if len(panel_widths) > 1:
+                fig.text(
+                    slot_left + _PANEL_LABEL_OFFSET[0],
+                    row_top - _PANEL_LABEL_OFFSET[1],
+                    f"{chr(ord('A') + len(axes))}.",
+                    fontsize=_PANEL_LABEL_SIZE,
+                    transform=fig.dpi_scale_trans,
+                )
+            axes.append(ax)
+    return fig, axes
+
+
+def plot_densities(
+    *, ax, posterior_df_by_model, priors, param_name, log_x=False, legend=True
+):
     lognormal_params = parse_lognormal_prior(name=param_name, priors=priors)
     prior_dist = scipy.stats.lognorm(
         s=lognormal_params["sigma"], scale=np.exp(lognormal_params["mu"])
@@ -109,7 +216,7 @@ def plot_densities(
             color=model_style["color"],
             label=model_style["label"],
         )
-    ax.plot(x_vec, prior_density_vec, "k--", label="prior")
+    ax.plot(x_vec, prior_density_vec, "k--", label="Prior")
     ax.set_xlim(lower, upper)
     ax.set_ylim(bottom=0)
     ax.set_xlabel(_PARAM_LABELS[param_name])
@@ -117,11 +224,9 @@ def plot_densities(
 
     if legend:
         ax.legend()
-    return fig
 
 
-def plot_model_probabilities(*, model_probability_by_model):
-    fig, ax = plt.subplots()
+def plot_model_probabilities(*, ax, model_probability_by_model):
     pie = ax.pie(
         list(model_probability_by_model.values()),
         colors=[
@@ -135,21 +240,20 @@ def plot_model_probabilities(*, model_probability_by_model):
             f"{_MODEL_STYLES[model_name]['label']} ({prob:.2f})"
             for model_name, prob in model_probability_by_model.items()
         ],
+        title="Model probability",
     )
-    ax.set_title("Model probabilities")
-    return fig
 
 
 def plot_risk_incidence_overlay(
     *,
+    ax,
     risk_df_by_model,
     reported_incidence_vec,
     first_case_date,
     risk_types=("cases",),
     vline_days=(),
 ):
-    # x is in days since the first case
-    fig, ax = plt.subplots()
+    # x is in days since the first case, up to the last risk day
     for model_name, risk_df in risk_df_by_model.items():
         model_style = _MODEL_STYLES[model_name]
         # Risks of cases and transmission coincide in the naive models, so they get one curve
@@ -166,19 +270,21 @@ def plot_risk_incidence_overlay(
                 risk_df["day"],
                 risk_df[f"risk_{risk_type}"],
                 color=model_style["color"],
-                linestyle=_RISK_TYPE_LINESTYLES[risk_type],
+                linestyle=_RISK_TYPE_LINESTYLES[risk_types.index(risk_type)],
                 label=label,
+                # Unclipped, so curves at a risk of 0 or 1 aren't halved by the limits
+                clip_on=False,
             )
     for vline_day in vline_days:
         ax.axvline(vline_day, color="black", linestyle="--")
     ax.legend()
+    # Every model has the same risk days
+    risk_days = next(iter(risk_df_by_model.values()))["day"].to_numpy()
     _month_start_x_axis(
-        ax=ax,
-        day_0_date=first_case_date,
-        # Every model has the same risk days
-        plot_days=next(iter(risk_df_by_model.values()))["day"].to_numpy(),
-        interval_months=1,
+        ax=ax, day_0_date=first_case_date, plot_days=risk_days, interval_months=1
     )
+    ax.set_xlim(right=risk_days[-1])
+    ax.set_ylim(0, 1)
     ax.set_ylabel(_RISK_TYPE_YLABELS[risk_types[0]] if len(risk_types) == 1 else "Risk")
     twin_ax = ax.twinx()
     twin_ax.bar(
@@ -198,18 +304,37 @@ def plot_risk_incidence_overlay(
     # Draw the primary axis (curves, legend) above the incidence bars.
     ax.set_zorder(twin_ax.get_zorder() + 1)
     ax.patch.set_visible(False)
-    return fig
+
+
+def plot_incidence(*, ax, reported_incidence_vec, first_case_date, ert_days):
+    # Reported cases by day since the first case, with the ERT's arrival and departure
+    # (ert_days, by event) marked
+    days = np.arange(len(reported_incidence_vec))
+    ax.bar(days, reported_incidence_vec, color="darkgray")
+    for event, day in ert_days.items():
+        ax.axvline(day, color="black", linestyle="--")
+        ax.annotate(
+            f"ERT {event}",
+            xy=(day, 1),
+            xycoords=("data", "axes fraction"),
+            xytext=(4, 0),
+            textcoords="offset points",
+            va="top",
+            fontsize=plt.rcParams["legend.fontsize"],
+        )
+    _month_start_x_axis(ax=ax, day_0_date=first_case_date, plot_days=days)
+    ax.set_ylim(bottom=0)
+    ax.set_ylabel("Number of cases")
 
 
 def plot_delay_distribution(
-    *, delay, delay_name, max_lag, label=None, overlay=None, overlay_label=None
+    *, ax, delay, delay_name, max_lag, label=None, overlay=None, overlay_label=None
 ):
     # Probability mass by lag as bars, optionally with another delay's as a line
-    fig, ax = plt.subplots()
-    bars = ax.bar(delay.lags, delay.prob, width=1, color="darkgray", label=label)
+    bars = ax.bar(delay.lags, delay.prob, width=1, color=_COLORS["blue"], label=label)
     if overlay is not None:
         (line,) = ax.plot(
-            overlay.lags, overlay.prob, color="tab:red", label=overlay_label
+            overlay.lags, overlay.prob, color=_COLORS["red"], label=overlay_label
         )
         # Bars first, which matplotlib would otherwise list after lines
         ax.legend(handles=[bars, line])
@@ -217,11 +342,11 @@ def plot_delay_distribution(
     ax.set_ylim(bottom=0)
     ax.set_xlabel(_DELAY_XLABELS[delay_name])
     ax.set_ylabel("Probability")
-    return fig
 
 
 def plot_fit_gate(
     *,
+    axes,
     status_by_criterion,
     fit_status,
     evidence_status,
@@ -229,10 +354,12 @@ def plot_fit_gate(
     days,
     comparison_day,
 ):
-    # One panel for each criterion's statuses ("pass", "fail" or "unassessed"), of shape
-    # (specs, days) over consecutive days, with the comparison day marked and the risk cells
-    # hatched where fit_status is "fail" (their MCSE is then conditional on a failed fit),
-    # and a column of each spec's evidence status
+    # A panel on each of axes (sharing y) for each criterion's statuses ("pass", "fail" or
+    # "unassessed"), of shape (specs, days) over consecutive days, with the comparison day
+    # marked and the risk cells hatched where fit_status is "fail" (their MCSE is then
+    # conditional on a failed fit). Each spec's evidence status is a column in the right
+    # margin of the last panel, and the legend is at the bottom of the figure, which should
+    # leave a gutter for it
     n_specs = len(spec_names)
     criteria = list(status_by_criterion)
     status_codes = {status: code for code, status in enumerate(_GATE_STATUS_COLORS)}
@@ -249,15 +376,7 @@ def plot_fit_gate(
             extent=(*x_lims, n_specs - 0.5, -0.5),
         )
 
-    fig, axes = plt.subplots(
-        1,
-        len(criteria) + 1,
-        sharey=True,
-        figsize=(2.5 * len(criteria) + 1, 0.25 * n_specs + 1.5),
-        width_ratios=[*[len(days)] * len(criteria), max(1, len(days) // 15)],
-        layout="constrained",
-    )
-    for ax, criterion in zip(axes[:-1], criteria, strict=True):
+    for ax, criterion in zip(axes, criteria, strict=True):
         _plot_statuses(
             ax=ax,
             statuses=np.asarray(status_by_criterion[criterion]),
@@ -281,7 +400,12 @@ def plot_fit_gate(
                 linewidth=0,
             )
         )
-    evidence_ax = axes[-1]
+    # Inset by 0.1 inches and 0.3 inches wide, whatever the panel's width
+    fig = axes[0].get_figure(root=True)
+    last_ax_width = axes[-1].get_position().width * fig.get_figwidth()
+    evidence_ax = axes[-1].inset_axes(
+        (1 + 0.1 / last_ax_width, 0, 0.3 / last_ax_width, 1)
+    )
     _plot_statuses(
         ax=evidence_ax,
         statuses=np.asarray(evidence_status)[:, None],
@@ -289,6 +413,7 @@ def plot_fit_gate(
     )
     # Labelled below, as a title would be wider than the column
     evidence_ax.set_xticks([0], labels=["Evidence"], rotation=90)
+    evidence_ax.tick_params(left=False, labelleft=False)
     axes[0].set_yticks(np.arange(n_specs), labels=spec_names)
     fig.legend(
         handles=[
@@ -303,10 +428,9 @@ def plot_fit_gate(
                 label="risk given a failed fit",
             ),
         ],
-        loc="outside lower center",
+        loc="lower center",
         ncols=len(_GATE_STATUS_COLORS) + 1,
     )
-    return fig
 
 
 def save_figure(*, fig, paths):
@@ -315,6 +439,26 @@ def save_figure(*, fig, paths):
         path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(path)
     plt.close(fig)
+
+
+def _pack_rows(*, panel_widths):
+    # Each row's panels as (first slot, width in slots), a panel starting a new row when it
+    # doesn't fit in the current one
+    rows = [[]]
+    n_used = 0
+    for width in panel_widths:
+        if n_used and (1 if width is None else width) > _N_SLOT_COLUMNS - n_used:
+            rows.append([])
+            n_used = 0
+        if width is None:
+            width = _N_SLOT_COLUMNS - n_used
+        if not 1 <= width <= _N_SLOT_COLUMNS:
+            raise ValueError(
+                f"Panel widths must be from 1 to {_N_SLOT_COLUMNS} slots, not {width}"
+            )
+        rows[-1].append((n_used, width))
+        n_used += width
+    return rows
 
 
 def _month_start_x_axis(*, ax, day_0_date, plot_days, interval_months=1):

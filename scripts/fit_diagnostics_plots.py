@@ -3,7 +3,12 @@ import argparse
 import numpy as np
 import pandas as pd
 
-from endoutbreakhet.plotting import plot_fit_gate, save_figure
+from endoutbreakhet.plotting import (
+    make_panel_figure,
+    plot_fit_gate,
+    save_figure,
+    set_plot_style,
+)
 from scripts.inputs import get_inputs_fit_diagnostics_plots
 
 # Fit criteria on a variable's diagnostic, by the prefix of its columns in the diagnostics,
@@ -23,6 +28,7 @@ _DAY_CRITERIA = (*_STAT_CRITERIA, *_COUNT_CRITERIA, "risk")
 
 
 def make_plots():
+    set_plot_style()
     inputs = get_inputs_fit_diagnostics_plots()
 
     thresholds = inputs["thresholds"]
@@ -47,7 +53,14 @@ def make_plots():
     }
     # Every spec is fitted on the same days
     days = next(iter(results_by_spec.values()))["risk_df"]["day"].to_numpy()
-    gate_fig = plot_fit_gate(
+    # A panel per criterion, with gutters for the spec names and the legend
+    gate_fig, gate_axes = make_panel_figure(
+        panel_widths=[1] * len(_DAY_CRITERIA),
+        sharey=True,
+        gutters={"left": 2.5, "bottom": 0.8},
+    )
+    plot_fit_gate(
+        axes=gate_axes,
         status_by_criterion={
             criterion: np.stack([gate[criterion] for gate in gate_by_spec.values()])
             for criterion in _DAY_CRITERIA

@@ -11,6 +11,14 @@ matplotlib.use("Agg")
 MODEL_NAMES = ["poisson", "sse", "ssi", "dlo", "poisson_so", "sse_so", "ssi_so"]
 
 
+@pytest.fixture(autouse=True)
+def _restore_rc_params():
+    # The plot scripts set the plot style globally, which shouldn't carry over to other
+    # tests
+    with matplotlib.rc_context():
+        yield
+
+
 @pytest.fixture
 def toy_inputs():
     # Last case on day 11, so force of infection (lags 1-4) is zero from day 16 and force

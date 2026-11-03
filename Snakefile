@@ -1,12 +1,15 @@
+import collections
 import glob
+import shutil
 
 from scripts.inputs import (
     COMPARISON_SPECS,
     DATA_PATH,
     MODEL_SPECS,
-    get_fig_paths_delay_distributions_plots,
     get_fig_paths_fit_diagnostics_plots,
     get_fig_paths_model_comparison_plots,
+    get_fig_paths_model_inputs_plots,
+    get_fig_paths_numbered,
     get_inputs_delay_distributions,
     get_inputs_model_fits,
     get_results_paths_delay_distributions,
@@ -28,10 +31,8 @@ shared_input_paths = [*package_paths, "scripts/inputs.py"]
 delay_distributions_results_paths = list(
     get_results_paths_delay_distributions().values()
 )
-delay_distributions_plots_fig_paths = [
-    path
-    for paths in get_fig_paths_delay_distributions_plots().values()
-    for path in paths
+model_inputs_plots_fig_paths = [
+    path for paths in get_fig_paths_model_inputs_plots().values() for path in paths
 ]
 
 fit_diagnostics_plots_fig_paths = [
@@ -55,6 +56,30 @@ def model_comparison_plots_fig_paths(*, comparison_spec_name):
     return [path for paths in fig_paths.values() for path in paths]
 
 
+# Every figure's number (2-6 in the paper, S1-S5 in its supplement, A1 onwards for figures
+# in neither), with the figure the numbered copy is made from. Figure 1, the schematic, has
+# none yet
+numbered_figure_sources = {
+    "2": get_fig_paths_model_inputs_plots()["summary"],
+    **{
+        figure_number: get_fig_paths_model_comparison_plots(
+            comparison_spec_name=comparison_spec_name
+        )[fig_name]
+        for figure_number, comparison_spec_name, fig_name in (
+            ("3", "naive_models_fixed_dispersion", "summary"),
+            ("4", "naive_models_estimated_dispersion", "summary"),
+            ("5", "naive_vs_so_fixed_dispersion", "summary"),
+            ("6", "naive_vs_so_80_pc_reporting", "summary"),
+            ("S1", "naive_vs_so_estimated_dispersion", "summary"),
+            ("S2", "naive_vs_so_60_pc_reporting", "summary"),
+            ("S3", "naive_vs_so_fixed_dispersion", "risk_sustained"),
+            ("S4", "naive_vs_so_80_pc_reporting", "risk_cases_reports"),
+            ("S5", "poisson_vs_superspreading", "summary"),
+        )
+    },
+    "A1": get_fig_paths_fit_diagnostics_plots()["gate"],
+}
+
 # Built before the rules below, since Snakemake resolves a rule's inputs when it is defined
 results_paths = [
     delay_distributions_results_paths,
@@ -63,12 +88,42 @@ results_paths = [
         for model_spec_name in MODEL_SPECS
     ),
 ]
-figure_paths = [
-    delay_distributions_plots_fig_paths,
-    fit_diagnostics_plots_fig_paths,
+plot_fig_paths = [
+    *model_inputs_plots_fig_paths,
+    *fit_diagnostics_plots_fig_paths,
     *(
-        model_comparison_plots_fig_paths(comparison_spec_name=comparison_spec_name)
+        path
         for comparison_spec_name in COMPARISON_SPECS
+        for path in model_comparison_plots_fig_paths(
+            comparison_spec_name=comparison_spec_name
+        )
+    ),
+]
+# Each figure the plot rules make has exactly one number
+numbered_source_counts = collections.Counter(
+    path for paths in numbered_figure_sources.values() for path in paths
+)
+numbering_errors = {
+    "unnumbered": set(plot_fig_paths) - numbered_source_counts.keys(),
+    "not made by a plot rule": numbered_source_counts.keys() - set(plot_fig_paths),
+    "numbered more than once": {
+        path for path, count in numbered_source_counts.items() if count > 1
+    },
+}
+if any(numbering_errors.values()):
+    raise ValueError(
+        "Every figure needs exactly one number in numbered_figure_sources: "
+        + "; ".join(
+            f"{error}: {sorted(map(str, paths))}"
+            for error, paths in numbering_errors.items()
+            if paths
+        )
+    )
+figure_paths = [
+    plot_fig_paths,
+    *(
+        get_fig_paths_numbered(figure_number=figure_number)
+        for figure_number in numbered_figure_sources
     ),
 ]
 
@@ -122,15 +177,16 @@ rule model_fits:
         "pixi run python -m scripts.model_fits --spec {wildcards.spec}"
 
 
-rule delay_distributions_plots:
+rule model_inputs_plots:
     input:
         shared_input_paths,
-        "scripts/delay_distributions_plots.py",
+        "scripts/model_inputs_plots.py",
+        DATA_PATH,
         delay_distributions_results_paths,
     output:
-        delay_distributions_plots_fig_paths,
+        model_inputs_plots_fig_paths,
     shell:
-        "pixi run python -m scripts.delay_distributions_plots"
+        "pixi run python -m scripts.model_inputs_plots"
 
 
 rule fit_diagnostics_plots:
@@ -170,3 +226,19 @@ for comparison_spec_name, comparison_spec in COMPARISON_SPECS.items():
             spec=comparison_spec_name,
         shell:
             "pixi run python -m scripts.model_comparison_plots --spec {params.spec}"
+
+
+# One rule per figure, copying it (in each format) to its numbered path
+for figure_number, source_paths in numbered_figure_sources.items():
+
+    rule:
+        name:
+            f"numbered_figure_{figure_number}"
+        input:
+            source_paths,
+        output:
+            get_fig_paths_numbered(figure_number=figure_number),
+        localrule: True
+        run:
+            for source_path, path in zip(input, output, strict=True):
+                shutil.copyfile(source_path, path)
