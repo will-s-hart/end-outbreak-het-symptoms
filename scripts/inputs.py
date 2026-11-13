@@ -54,7 +54,7 @@ MODEL_SPECS: dict[str, dict[str, Any]] = {
             "reporting_prob": 1.0,
             "fit_kwargs": FIT_KWARGS,
         }
-        for model_name in ("dlo", "sse", "ssi", "sse_so", "ssi_so")
+        for model_name in ("sse", "ssi", "ssd", "sse_so", "ssi_so")
         for dispersion_type, priors in (
             ("fixed", PRIORS_FIXED_DISPERSION),
             ("estimated", PRIORS_ESTIMATED_DISPERSION),
@@ -104,9 +104,9 @@ DATA_PATH = pathlib.Path("data/equateur_2018_onsets.csv")
 COMPARISON_SPECS: dict[str, dict[str, Any]] = {
     "naive_models_fixed_dispersion": {
         "model_spec_names": [
-            "dlo_fixed_dispersion",
             "sse_fixed_dispersion",
             "ssi_fixed_dispersion",
+            "ssd_fixed_dispersion",
         ],
         "figures": {
             "summary": {
@@ -117,9 +117,9 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
     },
     "naive_models_estimated_dispersion": {
         "model_spec_names": [
-            "dlo_estimated_dispersion",
             "sse_estimated_dispersion",
             "ssi_estimated_dispersion",
+            "ssd_estimated_dispersion",
         ],
         "figures": {
             "summary": {

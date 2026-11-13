@@ -32,7 +32,7 @@ def compute_log_evidence(
         "poisson": _poisson_log_likelihood_samples,
         "sse": _sse_log_likelihood_samples,
         "ssi": _ssi_log_likelihood_samples,
-        "dlo": _dlo_log_likelihood_samples,
+        "ssd": _ssd_log_likelihood_samples,
         "poisson_so": _poisson_so_log_likelihood_samples,
         "sse_so": _sse_so_log_likelihood_samples,
         "ssi_so": _ssi_so_log_likelihood_samples,
@@ -224,7 +224,7 @@ def _ssi_log_likelihood_samples(
     )
 
 
-def _dlo_log_likelihood_samples(
+def _ssd_log_likelihood_samples(
     *,
     reported_incidence_vec,
     switch_day,

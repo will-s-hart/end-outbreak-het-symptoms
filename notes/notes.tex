@@ -152,10 +152,10 @@ with mean \(Rw\) and dispersion \(kw\) from each case's share \(w\) of
 \(\lambda\), and each case's offspring total is \(\NBDist{R}{k}\),
 independently across cases.
 
-In the DLO model, daily counts do not split in this way (the dispersion
+In the SSD model, daily counts do not split in this way (the dispersion
 \(k\) does not scale with \(\lambda_t\)), so it is not a branching process
 and the formulae below do not apply. We give only its
-\(\RAC(t)=\RAT(t)\), computed directly (Section~\ref{sec:dlo});
+\(\RAC(t)=\RAT(t)\), computed directly (Section~\ref{sec:ssd});
 \(\RST(t)\) and \(\RAR(t)\) could be estimated by simulation.
 
 \subsection{Risk of additional cases}
@@ -452,8 +452,8 @@ and future cases have \(\PoissonDist{\Rfut}\) offspring. Hence
   \RAC(t)=\RAT(t)=1-\exp(-\Rfut\Lambda^{(\mathrm{rem})}_{t}).
 \end{equation}
 
-\subsection{DLO model}
-\label{sec:dlo}
+\subsection{SSD model}
+\label{sec:ssd}
 \subsubsection{Model definition}
 
 \begin{align}
@@ -687,11 +687,11 @@ the SSI model, future cases have \(\NBDist{\Rfut}{k}\) offspring, so
 
   \subsection{Models with negative binomial case counts}
 
-  In the DLO and SSE models, \(C_t\) given the history is of form
+  In the SSD and SSE models, \(C_t\) given the history is of form
   \begin{equation}
     C_t \sim \NBDist{M_t}{r_t},
   \end{equation}
-  with \(r_t=k\) (DLO model) or \(r_t=k\lambda_t\) (SSE model). By the
+  with \(r_t=k\) (SSD model) or \(r_t=k\lambda_t\) (SSE model). By the
   thinning property of negative binomial distributions (see
   Appendix~\ref{sec:nb-thinning}), the reported and unreported counts given
   the history are then dependent, with

@@ -35,7 +35,7 @@ def run_pipeline(
 ):
     # Fits the model to the onsets up to and including each day in risk_days and
     # comparison_day (taking onsets after the end of reported_incidence_vec to be zero),
-    # computing the fit's diagnostics and every risk the model has after that day (DLO risks
+    # computing the fit's diagnostics and every risk the model has after that day (SSD risks
     # of sustained transmission and reports aren't implemented), each with its Monte Carlo
     # standard error and R-hat. The trace and log evidence are kept for comparison_day only,
     # where specs are compared
@@ -48,7 +48,7 @@ def run_pipeline(
     )
     risk_types = (
         ("cases", "transmission")
-        if model_name == "dlo"
+        if model_name == "ssd"
         else ("cases", "transmission", "sustained", "reports")
     )
     analyse_day = functools.partial(

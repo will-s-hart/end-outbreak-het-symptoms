@@ -81,7 +81,7 @@ MODEL_STYLES = {
     "sse_so": {"label": "SSE-SO", "color": _COLORS["cyan"]},
     "ssi": {"label": "SSI", "color": _COLORS["red"]},
     "ssi_so": {"label": "SSI-SO", "color": _COLORS["orange"]},
-    "dlo": {"label": "DLO", "color": _COLORS["green"]},
+    "ssd": {"label": "SSD", "color": _COLORS["green"]},
 }
 
 # Reported cases, in every figure that shows them

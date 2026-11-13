@@ -474,9 +474,9 @@ def test_bridge_sampling_constant_counts():
     assert abs(result["log_evidence"]) < 4 * result["log_evidence_se"]
 
 
-@pytest.mark.parametrize("model_name", ["poisson", "dlo"])
+@pytest.mark.parametrize("model_name", ["poisson", "ssd"])
 def test_bridge_sampling_matches_quadrature(*, model_name, toy_inputs_fixed_dispersion):
-    # For the Poisson model, and the DLO model with fixed dispersion, the likelihood
+    # For the Poisson model, and the SSD model with fixed dispersion, the likelihood
     # factorises over days before and after the switch, and the priors are independent, so
     # the evidence is a product of 1-D integrals over log R and the posteriors of R before
     # and after the switch are independent (sampled exactly by inverse transform on a grid)
@@ -527,7 +527,7 @@ def test_bridge_sampling_matches_quadrature(*, model_name, toy_inputs_fixed_disp
                 np.interp(rng.uniform(size=(4, 1000)), cdf / cdf[-1], log_rep_no_grid)
             ),
         )
-    if model_name == "dlo":
+    if model_name == "ssd":
         # Fixed parameters are in the trace as deterministics
         posterior["dispersion"] = (("chain", "draw"), np.full((4, 1000), dispersion))
 

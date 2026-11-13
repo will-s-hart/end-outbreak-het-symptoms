@@ -11,12 +11,12 @@ from endoutbreakhet import DelayDistribution, risk
 
 _RISK_TYPES = ["cases", "transmission", "sustained", "reports"]
 _BRANCHING_MODEL_NAMES = ["poisson", "sse", "ssi", "poisson_so", "sse_so", "ssi_so"]
-# Every model with each risk type it has (DLO risks are of cases and transmission only)
+# Every model with each risk type it has (SSD risks are of cases and transmission only)
 _MODEL_AND_RISK_TYPES = [
     (model_name, risk_type)
     for model_name in _BRANCHING_MODEL_NAMES
     for risk_type in _RISK_TYPES
-] + [("dlo", "cases"), ("dlo", "transmission")]
+] + [("ssd", "cases"), ("ssd", "transmission")]
 
 
 @pytest.fixture
@@ -67,7 +67,7 @@ def test_naive_risk_matches_notes(
         for tau in range(final_day + 1, final_day + max_lag + 1)
     ]
     remaining_inf = sum(remaining_inf_by_day)
-    if model_name == "dlo":
+    if model_name == "ssd":
         expected = np.mean(
             1
             - np.prod(
@@ -364,10 +364,10 @@ def test_total_incidence_days_mismatch_raises(*, risk_inputs):
 
 
 @pytest.mark.parametrize("risk_type", ["sustained", "reports"])
-def test_dlo_sustained_and_reports_raise(*, risk_type, risk_inputs):
-    with pytest.raises(NotImplementedError, match="DLO"):
+def test_ssd_sustained_and_reports_raise(*, risk_type, risk_inputs):
+    with pytest.raises(NotImplementedError, match="SSD"):
         risk.compute_risk(
-            model_name="dlo",
+            model_name="ssd",
             **risk_inputs,
             trace=types.SimpleNamespace(posterior=xr.Dataset()),
             risk_type=risk_type,

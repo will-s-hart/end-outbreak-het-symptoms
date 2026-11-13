@@ -21,7 +21,7 @@ _GUIDE_COLOR = "0.8"
 # The superspreading schematic's box for each model: what its name stands for, what
 # transmission varies between, the level its superspreading is at and which events (infector
 # and day), infectors or days are superspreading, and the transmissions by each infector
-# (rows) on each day (columns), 12 in every box so only how they fall differs. DLO's are
+# (rows) on each day (columns), 12 in every box so only how they fall differs. SSD's are
 # each day's total, since it has no way to say which infector caused a transmission
 _SUPERSPREADING_BOXES = {
     "sse": {
@@ -38,8 +38,8 @@ _SUPERSPREADING_BOXES = {
         "superspreading": [1],
         "counts": [[0, 1, 0, 0], [3, 2, 3, 2], [0, 0, 1, 0]],
     },
-    "dlo": {
-        "expansion": "day-level overdispersion",
+    "ssd": {
+        "expansion": "superspreading days",
         "subtitle": "Total transmission varies between days",
         "level": "day",
         "superspreading": [2],

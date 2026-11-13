@@ -46,13 +46,13 @@ def test_plot_superspreading_schematic():
     _assert_canvas_in_inches(ax=ax)
     width = ax.get_xlim()[1]
     # A box for each model, titled in the model's colour
-    colors = [MODEL_STYLES[model_name]["color"] for model_name in ("sse", "ssi", "dlo")]
+    colors = [MODEL_STYLES[model_name]["color"] for model_name in ("sse", "ssi", "ssd")]
     titles = dict(
         zip(
             (
                 "SSE: superspreading events",
                 "SSI: superspreading individuals",
-                "DLO: day-level overdispersion",
+                "SSD: superspreading days",
             ),
             colors,
             strict=True,

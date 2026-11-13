@@ -162,13 +162,13 @@ def test_under_reporting_logp(*, model_name, toy_inputs_under_reporting):
     reported = reported_incidence_vec[days]
     unreported = total_incidence_vec[days] - reported
     mean = expected_incidence_vec[days]
-    if model_name not in ("dlo", "sse"):
+    if model_name not in ("ssd", "sse"):
         expected = scipy.stats.poisson.logpmf(
             reported, reporting_prob * mean
         ) + scipy.stats.poisson.logpmf(unreported, (1 - reporting_prob) * mean)
     else:
         dispersion = param_values["dispersion"] * (
-            1 if model_name == "dlo" else total_inf_vec[days]
+            1 if model_name == "ssd" else total_inf_vec[days]
         )
         expected = _nbinom_logpmf(
             k=reported, mean=reporting_prob * mean, dispersion=dispersion

@@ -16,7 +16,7 @@ distributions the fits read) and the `overview_plots`, `delay_distributions_plot
 make is copied to a numbered `figures/figure_<n>.<ext>`. Model fitting, risk, evidence and the
 pipeline support under-reporting with a known reporting probability (`reporting_prob`, set per
 model spec, with 60% and 80% reporting specs alongside the complete-reporting ones). Risk
-covers additional cases, transmission, sustained transmission and reported cases (DLO: cases
+covers additional cases, transmission, sustained transmission and reported cases (SSD: cases
 and transmission only), and the pipeline records every risk type the model has, with its Monte
 Carlo SE and R̂. nutpie samples the models with only continuous variables (the gamma latents'
 inverse CDF has a shape gradient of the package's own), and PyMC the under-reporting ones, with

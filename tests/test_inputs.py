@@ -56,7 +56,7 @@ def test_comparison_specs_valid(*, comparison_spec_name):
     assert len(set(model_names)) == len(model_names)
     recorded_risk_types = (
         {"cases", "transmission"}
-        if "dlo" in model_names
+        if "ssd" in model_names
         else {"cases", "transmission", "sustained", "reports"}
     )
     assert comparison_spec["figures"]

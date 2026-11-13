@@ -33,7 +33,7 @@ def compute_risk(
         "poisson": _poisson_risk_samples,
         "sse": _sse_risk_samples,
         "ssi": _ssi_risk_samples,
-        "dlo": _dlo_risk_samples,
+        "ssd": _ssd_risk_samples,
         "poisson_so": _poisson_so_risk_samples,
         "sse_so": _sse_so_risk_samples,
         "ssi_so": _ssi_so_risk_samples,
@@ -182,7 +182,7 @@ def _ssi_risk_samples(
     )
 
 
-def _dlo_risk_samples(
+def _ssd_risk_samples(
     *,
     total_incidence_vec_samples,
     switch_day,
@@ -193,7 +193,7 @@ def _dlo_risk_samples(
 ):
     if risk_type in ("sustained", "reports"):
         raise NotImplementedError(
-            "DLO risk of sustained transmission or reports is not implemented"
+            "SSD risk of sustained transmission or reports is not implemented"
         )
     n_days = total_incidence_vec_samples.shape[1]
     rep_no_before_samples = _posterior_samples(

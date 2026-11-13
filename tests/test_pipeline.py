@@ -40,8 +40,8 @@ def pipeline_inputs(*, toy_inputs):
     ("model_name", "risk_types"),
     [
         ("poisson", ("cases", "transmission", "sustained", "reports")),
-        # DLO risks of sustained transmission and reports aren't implemented
-        ("dlo", ("cases", "transmission")),
+        # SSD risks of sustained transmission and reports aren't implemented
+        ("ssd", ("cases", "transmission")),
     ],
 )
 def test_fits_data_through_each_day(

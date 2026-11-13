@@ -8,7 +8,7 @@ from endoutbreakhet import DelayDistribution
 # Non-interactive backend, so plotting tests don't need a display
 matplotlib.use("Agg")
 
-MODEL_NAMES = ["poisson", "sse", "ssi", "dlo", "poisson_so", "sse_so", "ssi_so"]
+MODEL_NAMES = ["poisson", "sse", "ssi", "ssd", "poisson_so", "sse_so", "ssi_so"]
 
 
 @pytest.fixture(autouse=True)

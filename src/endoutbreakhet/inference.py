@@ -149,7 +149,7 @@ def _build_pymc_model(
         "poisson": _build_poisson_model,
         "sse": _build_sse_model,
         "ssi": _build_ssi_model,
-        "dlo": _build_dlo_model,
+        "ssd": _build_ssd_model,
         "poisson_so": _build_poisson_so_model,
         "sse_so": _build_sse_so_model,
         "ssi_so": _build_ssi_so_model,
@@ -266,7 +266,7 @@ def _build_ssi_model(
     )
 
 
-def _build_dlo_model(
+def _build_ssd_model(
     *, reported_incidence_vec, switch_day, delay_distributions, priors, reporting_prob
 ):
     n_days = len(reported_incidence_vec)
