@@ -10,6 +10,7 @@ import seaborn as sns
 
 from endoutbreakhet import DelayDistribution
 from endoutbreakhet.plotting import (
+    DELAY_COLORS,
     _month_start_x_axis,
     _summarise_unreported_pmf,
     make_panel_figure,
@@ -150,6 +151,40 @@ def test_make_panel_figure_axes_square_if_narrow():
     margins = make_panel_figure(panels_per_row=[1])[0].get_figheight() - heights[0]
     assert fig.get_figheight() == pytest.approx(
         heights[[0, 1, 3, 6]].sum() + 4 * margins
+    )
+
+
+def test_make_panel_figure_axes_heights():
+    fig, axes = make_panel_figure(panels_per_row=[1, 2, 1], axes_heights=[3, None, 2.5])
+    heights = [_extent_inches(ax=ax)[2:] @ [-1, 1] for ax in axes]
+    default_fig, (default_ax,) = make_panel_figure(panels_per_row=[1])
+    default_height = _extent_inches(ax=default_ax)[2:] @ [-1, 1]
+    # The heights given, and the standard one for the row without
+    np.testing.assert_allclose(heights, [3, default_height, default_height, 2.5])
+    # Rows as tall as their axes and margins
+    assert fig.get_figheight() == pytest.approx(
+        3 + default_height + 2.5 + 3 * (default_fig.get_figheight() - default_height)
+    )
+    with pytest.raises(ValueError):
+        make_panel_figure(panels_per_row=[1, 1], axes_heights=[3])
+
+
+def test_make_panel_figure_schematic_rows():
+    fig, axes = make_panel_figure(panels_per_row=[1, 1, 1])
+    schematic_fig, schematic_axes = make_panel_figure(
+        panels_per_row=[1, 1, 1], schematic_rows=(1,)
+    )
+    # Less room below the schematic row's axes, so the figure is shorter
+    saved_height = fig.get_figheight() - schematic_fig.get_figheight()
+    assert 0 < saved_height < 1
+    # The axes keep their sizes, with the row below the schematic one moving up to it (so
+    # those above are that much nearer the figure's bottom)
+    np.testing.assert_allclose(
+        [_extent_inches(ax=ax) for ax in schematic_axes],
+        [
+            _extent_inches(ax=ax) - [0, 0, row_shift, row_shift]
+            for ax, row_shift in zip(axes, [saved_height, saved_height, 0], strict=True)
+        ],
     )
 
 
@@ -422,6 +457,8 @@ def test_plot_incidence():
     )
     assert [line.get_xdata()[0] for line in ax.get_lines()] == [20, 50]
     assert [text.get_text() for text in ax.texts] == ["ERT arrival", "ERT departure"]
+    # Each on the side of its line nearer the middle of the days
+    assert [text.get_ha() for text in ax.texts] == ["left", "right"]
     # The months containing the days since the first case: April to June
     assert ax.get_xlim() == (-3, 88)
 
@@ -484,6 +521,11 @@ def test_plot_delay_distribution_with_overlay():
         "Naive models",
         "SO models (implied)",
     ]
+    # In a colour no delay has, so not read as one of them
+    assert not any(
+        matplotlib.colors.same_color(line.get_color(), color)
+        for color in DELAY_COLORS.values()
+    )
 
 
 def test_plot_delay_distribution_colors():

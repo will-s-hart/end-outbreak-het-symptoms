@@ -19,6 +19,8 @@ _FIGURE_WIDTH = 14.0
 _AXES_HEIGHT = 5.3
 _AXES_MARGINS = {"left": 0.85, "right": 0.3, "bottom": 0.8, "top": 0.4}
 _FIGURE_RIGHT_MARGIN = 0.6
+# Below a row of schematics, which have no x axis to label
+_SCHEMATIC_BOTTOM_MARGIN = 0.15
 # From the top-left corner of a panel to the start of its label's baseline
 _PANEL_LABEL_OFFSET = (0.07, 0.28)
 _PANEL_LABEL_SIZE = 20
@@ -70,8 +72,9 @@ _PARAM_LABELS = {
     "dispersion": r"$k$",
 }
 
-# Each naive model and its SO variant are a dark and a light shade of one hue
-_MODEL_STYLES = {
+# Public, as are DELAY_COLORS, so figures a script draws itself (such as schematics) match
+# the rest. Each naive model and its SO variant are a dark and a light shade of one hue
+MODEL_STYLES = {
     "poisson": {"label": "Poisson", "color": "black"},
     "poisson_so": {"label": "Poisson-SO", "color": _COLORS["gray"]},
     "sse": {"label": "SSE", "color": _COLORS["blue"]},
@@ -122,12 +125,14 @@ _DELAY_XLABELS = {
     "tost": "Time from symptom onset to transmission (days)",
 }
 
-# Drawn translucent, so a line overlaid on the bars stands out
-_DELAY_COLORS = {
-    "serial_interval": _COLORS["blue"],
-    "inc_period": _COLORS["green"],
-    "tost": _COLORS["purple"],
+# A serial interval is a TOST then an incubation period, so its colour is the mix of theirs:
+# a purple, from blue and a crimson (the palette's own reds are too orange to mix to one).
+# The bars are drawn translucent, so a line overlaid on them stands out
+DELAY_COLORS = {
+    "inc_period": _COLORS["blue"],
+    "tost": matplotlib.colors.to_rgb("#d6336c"),
 }
+DELAY_COLORS["serial_interval"] = tuple(np.mean(list(DELAY_COLORS.values()), axis=0))
 _DELAY_BAR_ALPHA = 0.5
 
 
@@ -159,14 +164,23 @@ def set_plot_style():
 
 
 def make_panel_figure(
-    *, panels_per_row, width=_FIGURE_WIDTH, labels=None, sharey=False, gutters=None
+    *,
+    panels_per_row,
+    width=_FIGURE_WIDTH,
+    labels=None,
+    sharey=False,
+    gutters=None,
+    axes_heights=None,
+    schematic_rows=(),
 ):
     # A figure width inches wide of rows of panels, panels_per_row giving the number in each
     # row, and the panels' axes in order. A row's panels share the width equally, and their
-    # axes are _AXES_HEIGHT tall, or square if narrower than that. Panels are labelled "A.",
+    # axes are _AXES_HEIGHT tall, or square if narrower than that, unless axes_heights gives
+    # the row's height in inches (None for a row keeps that rule). Panels are labelled "A.",
     # "B.", ... unless there is just one, or by labels (None for no label). With sharey, the
     # panels share the first's y axis, labelled only on panels starting a row. gutters adds
-    # space (in inches, by side) around the panels for figure-level decorations
+    # space (in inches, by side) around the panels for figure-level decorations. The rows
+    # in schematic_rows (by index) hold schematics, so leave no room for an x axis's labels
     n_panels = sum(panels_per_row)
     if labels is None:
         labels = (
@@ -184,10 +198,21 @@ def make_panel_figure(
         panel_width - _AXES_MARGINS["left"] - _AXES_MARGINS["right"]
         for panel_width in panel_widths
     ]
-    axes_heights = [min(_AXES_HEIGHT, axes_width) for axes_width in axes_widths]
+    axes_heights = [
+        min(_AXES_HEIGHT, axes_width) if axes_height is None else axes_height
+        for axes_width, axes_height in zip(
+            axes_widths, axes_heights or [None] * len(axes_widths), strict=True
+        )
+    ]
+    bottom_margins = [
+        _SCHEMATIC_BOTTOM_MARGIN
+        if row_idx in schematic_rows
+        else _AXES_MARGINS["bottom"]
+        for row_idx in range(len(panels_per_row))
+    ]
     row_heights = [
-        _AXES_MARGINS["top"] + axes_height + _AXES_MARGINS["bottom"]
-        for axes_height in axes_heights
+        _AXES_MARGINS["top"] + axes_height + bottom_margin
+        for axes_height, bottom_margin in zip(axes_heights, bottom_margins, strict=True)
     ]
     fig_width = gutters["left"] + width + gutters["right"]
     fig_height = gutters["top"] + sum(row_heights) + gutters["bottom"]
@@ -195,11 +220,19 @@ def make_panel_figure(
     axes = []
     # In inches from the bottom of the figure, as are the positions below
     row_top = fig_height - gutters["top"]
-    for n_row_panels, panel_width, axes_width, axes_height, row_height in zip(
+    for (
+        n_row_panels,
+        panel_width,
+        axes_width,
+        axes_height,
+        bottom_margin,
+        row_height,
+    ) in zip(
         panels_per_row,
         panel_widths,
         axes_widths,
         axes_heights,
+        bottom_margins,
         row_heights,
         strict=True,
     ):
@@ -208,7 +241,7 @@ def make_panel_figure(
             ax = fig.add_axes(
                 (
                     (panel_left + _AXES_MARGINS["left"]) / fig_width,
-                    (row_top - row_height + _AXES_MARGINS["bottom"]) / fig_height,
+                    (row_top - row_height + bottom_margin) / fig_height,
                     axes_width / fig_width,
                     axes_height / fig_height,
                 ),
@@ -278,7 +311,7 @@ def plot_densities(
 
     for model_name, samples in samples_by_model.items():
         kde = scipy.stats.gaussian_kde(np.log10(samples) if log_x else samples)
-        model_style = _MODEL_STYLES[model_name]
+        model_style = MODEL_STYLES[model_name]
         ax.plot(
             x_vec,
             kde(kde_eval_vec),
@@ -311,7 +344,7 @@ def plot_model_probabilities_inset(
     pie = box_ax.inset_axes(layout["pie_bounds"]).pie(
         list(model_probability_by_model.values()),
         colors=[
-            _MODEL_STYLES[model_name]["color"]
+            MODEL_STYLES[model_name]["color"]
             for model_name in model_probability_by_model
         ],
         wedgeprops={"edgecolor": "white", "linewidth": 1},
@@ -320,7 +353,7 @@ def plot_model_probabilities_inset(
     box_ax.legend(
         pie.wedges,
         [
-            f"{_MODEL_STYLES[model_name]['label']} ({prob:.2f})"
+            f"{MODEL_STYLES[model_name]['label']} ({prob:.2f})"
             for model_name, prob in model_probability_by_model.items()
         ],
         title="Model probability",
@@ -348,7 +381,7 @@ def plot_risk_incidence_overlay(
 ):
     # x is in days since the first case, up to the last risk day
     for model_name, risk_df in risk_df_by_model.items():
-        model_style = _MODEL_STYLES[model_name]
+        model_style = MODEL_STYLES[model_name]
         # Risks of cases and transmission coincide in the naive models, so they get one curve
         model_risk_types = (
             tuple(risk_type for risk_type in risk_types if risk_type != "transmission")
@@ -434,7 +467,7 @@ def plot_unreported_incidence(
             sharey=strip_axes[0] if strip_axes else None,
         )
         strip_axes.append(strip_ax)
-        model_style = _MODEL_STYLES[model_name]
+        model_style = MODEL_STYLES[model_name]
         days, mean_vec, (lower_vec, upper_vec) = _summarise_unreported_pmf(
             pmf_df=pmf_df, quantile_levels=_UNREPORTED_INTERVAL
         )
@@ -487,19 +520,22 @@ def plot_unreported_incidence(
 
 def plot_incidence(*, ax, reported_incidence_vec, first_case_date, ert_days):
     # Reported cases by day since the first case, with the ERT's arrival and departure
-    # (ert_days, by event) marked
+    # (ert_days, by event) marked, each labelled on the side of its line nearer the middle
+    # of the days, so a label by a late event stays within the panel
     days = np.arange(len(reported_incidence_vec))
     ax.bar(days, reported_incidence_vec, color=_INCIDENCE_COLOR)
     for event, day in ert_days.items():
+        label_on_left = day > days[-1] / 2
         ax.axvline(day, color="black", linestyle="--")
         ax.annotate(
             f"ERT {event}",
             xy=(day, 1),
             xycoords=("data", "axes fraction"),
-            xytext=(4, 0),
+            xytext=(-4 if label_on_left else 4, 0),
             textcoords="offset points",
+            ha="right" if label_on_left else "left",
             va="top",
-            fontsize=plt.rcParams["legend.fontsize"],
+            fontsize=plt.rcParams["axes.labelsize"],
         )
     _month_start_x_axis(ax=ax, day_0_date=first_case_date, plot_days=days)
     ax.set_ylim(bottom=0)
@@ -514,13 +550,13 @@ def plot_delay_distribution(
         delay.lags,
         delay.prob,
         width=1,
-        color=_DELAY_COLORS[delay_name],
+        color=DELAY_COLORS[delay_name],
         alpha=_DELAY_BAR_ALPHA,
         label=label,
     )
     if overlay is not None:
         (line,) = ax.plot(
-            overlay.lags, overlay.prob, color=_COLORS["red"], label=overlay_label
+            overlay.lags, overlay.prob, color="black", label=overlay_label
         )
         # Bars first, which matplotlib would otherwise list after lines
         ax.legend(handles=[bars, line])

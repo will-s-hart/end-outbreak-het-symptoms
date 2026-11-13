@@ -11,8 +11,8 @@ that produces the numerical results and figures.
 
 **Status:** the library (model fitting, risk, evidence, the rolling-fit pipeline and plotting),
 the `delay_distributions` and `model_fits` analysis scripts (the first discretises the delay
-distributions the fits read) and the `model_inputs_plots`, `model_comparison_plots` and
-`fit_diagnostics_plots` plot scripts exist, each with Snakemake rules, and each figure they
+distributions the fits read) and the `overview_plots`, `delay_distributions_plots`,
+`model_comparison_plots` and `fit_diagnostics_plots` plot scripts exist, each with Snakemake rules, and each figure they
 make is copied to a numbered `figures/figure_<n>.<ext>`. Model fitting, risk, evidence and the
 pipeline support under-reporting with a known reporting probability (`reporting_prob`, set per
 model spec, with 60% and 80% reporting specs alongside the complete-reporting ones). Risk
@@ -30,7 +30,10 @@ diagnostics (R̂, bulk/tail ESS, divergences, draws at the maximum tree depth).
 `inputs.py`) to the diagnostics, risks and log evidence SEs, reporting failures without
 blocking anything downstream. Each comparison spec (`COMPARISON_SPECS` in `inputs.py`) lists
 its figures, each by the panels it has (densities with model probabilities, unreported cases,
-risks, in that order), which `model_comparison_plots` lays out. Keep this file in step as more land:
+risks, in that order), which `model_comparison_plots` lays out. `overview_plots` draws the
+reported incidence above two schematics, of the superspreading models and of the naive
+against the SO models, drawn in matplotlib like every other figure. Keep this file in step
+as more land:
 describe what exists, not what is planned.
 
 ## Layout
@@ -124,7 +127,7 @@ commands** — wire them in as rules.
   `localrule: True`, for rules defined in a loop), so on a cluster they don't queue for a slot.
 - Add each analysis's output paths to the `results_paths` / `plot_fig_paths` aggregates, which
   are built before `rule all` (Snakemake resolves a rule's inputs when it is defined).
-- Every figure a plot rule makes gets a number in `numbered_figure_sources` (2 onwards in the
+- Every figure a plot rule makes gets a number in `numbered_figure_sources` (1 onwards in the
   paper, S1 onwards in its supplement, A1 onwards for figures in neither), and a
   `numbered_figure_<n>` rule copies it to `figures/figure_<n>.<ext>`. The Snakefile raises
   while parsing if a figure is unnumbered or numbered twice.
@@ -158,7 +161,11 @@ from several analyses or several runs of one (e.g. overlapping sets of model spe
   `plotting.make_panel_figure`, with the `plotting.plot_*` functions drawing onto the axes it
   returns. A figure is rows of panels (`panels_per_row`) and has a width in inches, which
   each row's panels share equally, with axes margins fixed in inches, so every row starts
-  and ends in line. Axes are a fixed height, or square if narrower than that. Scripts save
+  and ends in line. Axes are a fixed height, or square if narrower than that, unless the
+  row is given a height (`axes_heights`). A schematic is a panel like any other, in a row
+  listed in `schematic_rows`. Drawing only one figure has (as its schematics are) stays
+  private in its script, taking its colours from `plotting.MODEL_STYLES` and
+  `plotting.DELAY_COLORS` so they match the other figures. Scripts save
   only these figures, never their panels separately (a single-panel figure is one with a
   single panel).
 - Figure numbers live only in the Snakefile's `numbered_figure_sources`. Don't put figure

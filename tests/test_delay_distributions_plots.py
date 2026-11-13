@@ -4,14 +4,14 @@ import pandas as pd
 import pytest
 
 from endoutbreakhet import DELAY_FIRST_LAGS, DelayDistribution
-from scripts import model_inputs_plots
-from scripts.inputs import get_inputs_model_inputs_plots
+from scripts import delay_distributions_plots
+from scripts.inputs import get_inputs_delay_distributions_plots
 
 
 def test_make_plots_writes_figures(*, tmp_path, monkeypatch):
     # Real inputs, with the results and figure redirected into tmp_path and toy delay
     # distributions written there
-    inputs = get_inputs_model_inputs_plots()
+    inputs = get_inputs_delay_distributions_plots()
     inputs["delay_distributions_results_paths"] = {
         delay_name: tmp_path / path
         for delay_name, path in inputs["delay_distributions_results_paths"].items()
@@ -26,12 +26,12 @@ def test_make_plots_writes_figures(*, tmp_path, monkeypatch):
             prob=np.array([0.1, 0.4, 0.3, 0.2]), first_lag=DELAY_FIRST_LAGS[delay_name]
         ).to_df().to_csv(path, index=False)
     monkeypatch.setattr(
-        model_inputs_plots,
-        "get_inputs_model_inputs_plots",
+        delay_distributions_plots,
+        "get_inputs_delay_distributions_plots",
         lambda: inputs,
     )
 
-    model_inputs_plots.make_plots()
+    delay_distributions_plots.make_plots()
 
     for paths in inputs["fig_paths"].values():
         for path in paths:
@@ -41,7 +41,7 @@ def test_make_plots_writes_figures(*, tmp_path, monkeypatch):
 def test_implied_serial_interval():
     # TOST of 0 or 1 days and incubation period of 1 or 2 days, each equally likely, so
     # the serial interval is 1, 2 or 3 days with probabilities 1/4, 1/2, 1/4
-    implied = model_inputs_plots._implied_serial_interval(
+    implied = delay_distributions_plots._implied_serial_interval(
         tost=DelayDistribution(prob=np.array([0.5, 0.5]), first_lag=0),
         inc_period=DelayDistribution(prob=np.array([0.5, 0.5]), first_lag=1),
     )
@@ -54,11 +54,11 @@ def test_implied_serial_interval_matches_naive_moments():
     # incubation period, so the implied serial interval should nearly match the naive one
     delay_by_name = {
         delay_name: DelayDistribution.from_df(df=pd.read_csv(path))
-        for delay_name, path in get_inputs_model_inputs_plots()[
+        for delay_name, path in get_inputs_delay_distributions_plots()[
             "delay_distributions_results_paths"
         ].items()
     }
-    implied = model_inputs_plots._implied_serial_interval(
+    implied = delay_distributions_plots._implied_serial_interval(
         tost=delay_by_name["tost"], inc_period=delay_by_name["inc_period"]
     )
     naive = delay_by_name["serial_interval"]

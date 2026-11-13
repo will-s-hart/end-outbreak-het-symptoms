@@ -7,31 +7,23 @@ from endoutbreakhet import DelayDistribution
 from endoutbreakhet.plotting import (
     make_panel_figure,
     plot_delay_distribution,
-    plot_incidence,
     save_figure,
     set_plot_style,
 )
-from scripts.inputs import get_inputs_model_inputs_plots
+from scripts.inputs import get_inputs_delay_distributions_plots
 
 
 def make_plots():
     set_plot_style()
-    inputs = get_inputs_model_inputs_plots()
+    inputs = get_inputs_delay_distributions_plots()
 
     delay_by_name = {
         delay_name: DelayDistribution.from_df(df=pd.read_csv(path))
         for delay_name, path in inputs["delay_distributions_results_paths"].items()
     }
-    # The incidence across the top, above the delay distributions, in a figure wide enough
-    # (in inches) for their panels to be as tall as the incidence's
-    fig, (incidence_ax, serial_interval_ax, inc_period_ax, tost_ax) = make_panel_figure(
-        panels_per_row=[1, 3], width=20.7
-    )
-    plot_incidence(
-        ax=incidence_ax,
-        reported_incidence_vec=inputs["reported_incidence_vec"],
-        first_case_date=inputs["first_case_date"],
-        ert_days=inputs["ert_days"],
+    # A figure wide enough (in inches) for the three panels' axes to be the standard height
+    fig, (serial_interval_ax, inc_period_ax, tost_ax) = make_panel_figure(
+        panels_per_row=[3], width=20.7
     )
     # Serial interval used by the naive models, with that implied by the incubation
     # period and TOST used by the SO models
@@ -68,8 +60,8 @@ def _implied_serial_interval(*, tost, inc_period):
 if __name__ == "__main__":
     argparse.ArgumentParser(
         description=(
-            "Plot the reported incidence and the discretised delay distributions, with the "
-            "serial interval implied by the incubation period and TOST."
+            "Plot the discretised delay distributions, with the serial interval implied by "
+            "the incubation period and TOST."
         )
     ).parse_args()
 

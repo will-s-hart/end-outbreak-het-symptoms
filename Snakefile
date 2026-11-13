@@ -6,10 +6,11 @@ from scripts.inputs import (
     COMPARISON_SPECS,
     DATA_PATH,
     MODEL_SPECS,
+    get_fig_paths_delay_distributions_plots,
     get_fig_paths_fit_diagnostics_plots,
     get_fig_paths_model_comparison_plots,
-    get_fig_paths_model_inputs_plots,
     get_fig_paths_numbered,
+    get_fig_paths_overview_plots,
     get_inputs_delay_distributions,
     get_inputs_model_comparison_plots,
     get_inputs_model_fits,
@@ -32,8 +33,13 @@ shared_input_paths = [*package_paths, "scripts/inputs.py"]
 delay_distributions_results_paths = list(
     get_results_paths_delay_distributions().values()
 )
-model_inputs_plots_fig_paths = [
-    path for paths in get_fig_paths_model_inputs_plots().values() for path in paths
+overview_plots_fig_paths = [
+    path for paths in get_fig_paths_overview_plots().values() for path in paths
+]
+delay_distributions_plots_fig_paths = [
+    path
+    for paths in get_fig_paths_delay_distributions_plots().values()
+    for path in paths
 ]
 
 fit_diagnostics_plots_fig_paths = [
@@ -65,26 +71,26 @@ def model_comparison_plots_fig_paths(*, comparison_spec_name):
     return [path for paths in fig_paths.values() for path in paths]
 
 
-# Every figure's number (2-6 in the paper, S1-S6 in its supplement, A1 onwards for figures
-# in neither), with the figure the numbered copy is made from. Figure 1, the schematic, has
-# none yet
+# Every figure's number (1-5 in the paper, S1-S7 in its supplement, A1 onwards for figures
+# in neither), with the figure the numbered copy is made from
 numbered_figure_sources = {
-    "2": get_fig_paths_model_inputs_plots()["summary"],
+    "1": get_fig_paths_overview_plots()["summary"],
+    "S1": get_fig_paths_delay_distributions_plots()["summary"],
     **{
         figure_number: get_fig_paths_model_comparison_plots(
             comparison_spec_name=comparison_spec_name
         )[fig_name]
         for figure_number, comparison_spec_name, fig_name in (
-            ("3", "naive_models_fixed_dispersion", "summary"),
-            ("4", "naive_models_estimated_dispersion", "summary"),
-            ("5", "naive_vs_so_fixed_dispersion", "summary"),
-            ("6", "naive_vs_so_80_pc_reporting", "unreported_risk"),
-            ("S1", "naive_vs_so_estimated_dispersion", "summary"),
-            ("S2", "naive_vs_so_80_pc_reporting", "posterior"),
-            ("S3", "naive_vs_so_60_pc_reporting", "summary"),
-            ("S4", "naive_vs_so_fixed_dispersion", "risk_sustained"),
-            ("S5", "naive_vs_so_80_pc_reporting", "risk_cases_reports"),
-            ("S6", "poisson_vs_superspreading", "summary"),
+            ("2", "naive_models_fixed_dispersion", "summary"),
+            ("3", "naive_models_estimated_dispersion", "summary"),
+            ("4", "naive_vs_so_fixed_dispersion", "summary"),
+            ("5", "naive_vs_so_80_pc_reporting", "unreported_risk"),
+            ("S2", "naive_vs_so_estimated_dispersion", "summary"),
+            ("S3", "naive_vs_so_80_pc_reporting", "posterior"),
+            ("S4", "naive_vs_so_60_pc_reporting", "summary"),
+            ("S5", "naive_vs_so_fixed_dispersion", "risk_sustained"),
+            ("S6", "naive_vs_so_80_pc_reporting", "risk_cases_reports"),
+            ("S7", "poisson_vs_superspreading", "summary"),
         )
     },
     "A1": get_fig_paths_fit_diagnostics_plots()["gate"],
@@ -99,7 +105,8 @@ results_paths = [
     ),
 ]
 plot_fig_paths = [
-    *model_inputs_plots_fig_paths,
+    *overview_plots_fig_paths,
+    *delay_distributions_plots_fig_paths,
     *fit_diagnostics_plots_fig_paths,
     *(
         path
@@ -203,16 +210,26 @@ use rule model_fits_complete_reporting as model_fits_under_reporting with:
         ),
 
 
-rule model_inputs_plots:
+rule overview_plots:
     input:
         shared_input_paths,
-        "scripts/model_inputs_plots.py",
+        "scripts/overview_plots.py",
         DATA_PATH,
+    output:
+        overview_plots_fig_paths,
+    shell:
+        "pixi run python -m scripts.overview_plots"
+
+
+rule delay_distributions_plots:
+    input:
+        shared_input_paths,
+        "scripts/delay_distributions_plots.py",
         delay_distributions_results_paths,
     output:
-        model_inputs_plots_fig_paths,
+        delay_distributions_plots_fig_paths,
     shell:
-        "pixi run python -m scripts.model_inputs_plots"
+        "pixi run python -m scripts.delay_distributions_plots"
 
 
 rule fit_diagnostics_plots:

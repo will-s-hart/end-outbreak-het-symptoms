@@ -253,14 +253,26 @@ def get_inputs_model_fits(*, model_spec_name):
     }
 
 
-def get_inputs_model_inputs_plots():
+def get_inputs_overview_plots():
+    cont_params_by_delay = get_inputs_delay_distributions()["cont_params_by_delay"]
     return {
         **_get_shared_inputs(),
+        # To which the schematic of the delays is drawn to scale
+        "delay_means": {
+            delay_name: cont_params["mean"]
+            for delay_name, cont_params in cont_params_by_delay.items()
+        },
+        "fig_paths": get_fig_paths_overview_plots(),
+    }
+
+
+def get_inputs_delay_distributions_plots():
+    return {
         "delay_distributions_results_paths": get_results_paths_delay_distributions(),
         # Shared by the panels so they can be compared, and past the 99th percentile of
         # every delay
         "max_plot_lag": 50,
-        "fig_paths": get_fig_paths_model_inputs_plots(),
+        "fig_paths": get_fig_paths_delay_distributions_plots(),
     }
 
 
@@ -376,9 +388,15 @@ def get_results_paths_model_fits(*, model_spec_name):
     }
 
 
-def get_fig_paths_model_inputs_plots():
+def get_fig_paths_overview_plots():
     # One path per file format for the figure
-    fig_dir = pathlib.Path("figures/model_inputs")
+    fig_dir = pathlib.Path("figures/overview")
+    return {"summary": [fig_dir / f"summary.{ext}" for ext in FIG_EXTENSIONS]}
+
+
+def get_fig_paths_delay_distributions_plots():
+    # One path per file format for the figure
+    fig_dir = pathlib.Path("figures/delay_distributions")
     return {"summary": [fig_dir / f"summary.{ext}" for ext in FIG_EXTENSIONS]}
 
 

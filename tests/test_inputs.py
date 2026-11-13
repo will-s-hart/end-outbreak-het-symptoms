@@ -14,10 +14,11 @@ from scripts.inputs import (
     MODEL_SPECS,
     get_fig_paths_numbered,
     get_inputs_delay_distributions,
+    get_inputs_delay_distributions_plots,
     get_inputs_fit_diagnostics_plots,
     get_inputs_model_comparison_plots,
     get_inputs_model_fits,
-    get_inputs_model_inputs_plots,
+    get_inputs_overview_plots,
     get_results_paths_delay_distributions,
 )
 from scripts.snakemake_utils import as_param
@@ -152,23 +153,42 @@ def test_get_inputs_delay_distributions():
     as_param(inputs=inputs)
 
 
-def test_get_inputs_model_inputs_plots(*, monkeypatch):
-    # Only the paths are checked, so skip loading the data
+def _assert_summary_fig_paths(*, fig_paths, fig_dir):
+    # A single figure, with a path in fig_dir for each format
+    assert list(fig_paths) == ["summary"]
+    assert fig_paths["summary"] == [
+        pathlib.Path(fig_dir) / f"summary.{ext}" for ext in FIG_EXTENSIONS
+    ]
+
+
+def test_get_inputs_overview_plots(*, monkeypatch):
+    # The data isn't checked, so skip loading it
     monkeypatch.setattr(scripts.inputs, "_get_shared_inputs", dict)
-    inputs = get_inputs_model_inputs_plots()
+    inputs = get_inputs_overview_plots()
+    # The means the delays are discretised from, with the TOST's making up the serial
+    # interval's with the incubation period's
+    cont_params_by_delay = get_inputs_delay_distributions()["cont_params_by_delay"]
+    delay_means = inputs["delay_means"]
+    assert delay_means == {
+        delay_name: cont_params["mean"]
+        for delay_name, cont_params in cont_params_by_delay.items()
+    }
+    assert delay_means["tost"] + delay_means["inc_period"] == pytest.approx(
+        delay_means["serial_interval"]
+    )
+    _assert_summary_fig_paths(fig_paths=inputs["fig_paths"], fig_dir="figures/overview")
+
+
+def test_get_inputs_delay_distributions_plots():
+    inputs = get_inputs_delay_distributions_plots()
     # Reads the results where the analysis writes them
     assert (
         inputs["delay_distributions_results_paths"]
         == get_results_paths_delay_distributions()
     )
-    fig_paths = inputs["fig_paths"]
-    assert list(fig_paths) == ["summary"]
-    assert [path.suffix for path in fig_paths["summary"]] == [
-        f".{ext}" for ext in FIG_EXTENSIONS
-    ]
-    for path in fig_paths["summary"]:
-        assert path.parent == pathlib.Path("figures/model_inputs")
-        assert path.stem == "summary"
+    _assert_summary_fig_paths(
+        fig_paths=inputs["fig_paths"], fig_dir="figures/delay_distributions"
+    )
 
 
 def test_get_fig_paths_numbered():
