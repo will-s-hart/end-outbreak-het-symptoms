@@ -1,6 +1,7 @@
 # Note that AI tools were used to generate tests
 import matplotlib.colors
 import matplotlib.pyplot as plt
+import matplotlib.transforms
 import numpy as np
 import pandas as pd
 import pytest
@@ -16,7 +17,6 @@ from endoutbreakhet.plotting import (
     plot_densities,
     plot_fit_gate,
     plot_incidence,
-    plot_model_probabilities,
     plot_model_probabilities_inset,
     plot_risk_incidence_overlay,
     plot_unreported_incidence,
@@ -107,56 +107,71 @@ def _extent_inches(*, ax):
     )
 
 
-@pytest.mark.parametrize(
-    ("panel_widths", "spanned_axes_idxs"),
-    [
-        # A panel filling a row of its own spans the three above it
-        ([1, 1, 1, None], (0, 2)),
-        # One filling the rest of a row spans the two above it
-        ([1, 1, 1, 1, None], (1, 2)),
-        ([1, 1, 1, 1, 2], (1, 2)),
-    ],
-)
-def test_make_panel_figure_aligns_spanning_panels(*, panel_widths, spanned_axes_idxs):
-    fig, axes = make_panel_figure(panel_widths=panel_widths)
-    assert len(axes) == len(panel_widths)
-    assert fig.axes == axes
-    first_idx, last_idx = spanned_axes_idxs
-    left, right, bottom, top = _extent_inches(ax=axes[-1])
-    assert left == pytest.approx(_extent_inches(ax=axes[first_idx])[0])
-    assert right == pytest.approx(_extent_inches(ax=axes[last_idx])[1])
-    # In the second row, as tall as the first
-    first_row_extent = _extent_inches(ax=axes[0])
-    assert top < first_row_extent[2]
-    assert top - bottom == pytest.approx(first_row_extent[3] - first_row_extent[2])
-    assert [text.get_text() for text in fig.texts] == [
-        f"{chr(ord('A') + idx)}." for idx in range(len(panel_widths))
-    ]
-
-
-def test_make_panel_figure_sizes_by_slots():
-    single_fig, (single_ax,) = make_panel_figure(panel_widths=[1])
-    single_width, single_height = single_fig.get_size_inches()
-    slot_width = make_panel_figure(panel_widths=[1, 1])[0].get_figwidth() - single_width
-    # A panel too wide for the rest of the row starts a new one, and the figure is as wide
-    # as its widest row
-    fig, axes = make_panel_figure(panel_widths=[2, 2])
+def test_make_panel_figure_rows_share_width():
+    fig, axes = make_panel_figure(panels_per_row=[2, 1, 3])
+    assert fig.axes == axes and len(axes) == 6
+    assert fig.get_figwidth() == pytest.approx(14)
+    extents = np.array([_extent_inches(ax=ax) for ax in axes])
+    rows = [extents[:2], extents[2:3], extents[3:]]
+    # Every row starts and ends in line with the others, with its panels alike and evenly
+    # spaced across the same width, and sits below the one before
+    for row in rows:
+        assert row[0, 0] == pytest.approx(rows[0][0, 0])
+        assert row[-1, 1] == pytest.approx(rows[0][-1, 1])
+        np.testing.assert_allclose(row[:, 1] - row[:, 0], row[0, 1] - row[0, 0])
+        np.testing.assert_allclose(row[:, 2:], np.tile(row[0, 2:], (len(row), 1)))
     np.testing.assert_allclose(
-        fig.get_size_inches(), [single_width + slot_width, 2 * single_height]
+        np.diff(rows[2][:, 0]) * 3, np.diff(rows[0][:, 0])[0] * 2
     )
-    # Panels a slot wider by a slot's width, with the same margins
-    single_extent = _extent_inches(ax=single_ax)
+    assert rows[0][0, 2] > rows[1][0, 3] and rows[1][0, 2] > rows[2][0, 3]
+    assert [text.get_text() for text in fig.texts] == [
+        f"{letter}." for letter in "ABCDEF"
+    ]
+    # Each label keeps its place above its panel's axes
     np.testing.assert_allclose(
-        _extent_inches(ax=axes[1]), single_extent + [0, slot_width, 0, 0]
+        [text.get_position() for text in fig.texts],
+        extents[:, [0, 3]] + (fig.texts[0].get_position() - extents[0, [0, 3]]),
+    )
+
+
+def test_make_panel_figure_axes_square_if_narrow():
+    fig, axes = make_panel_figure(panels_per_row=[1, 2, 3, 4])
+    widths, heights = (
+        np.array([_extent_inches(ax=ax)[idxs] @ [-1, 1] for ax in axes])
+        for idxs in ([0, 1], [2, 3])
+    )
+    # Wider than the standard height in rows of one or two, so that tall
+    np.testing.assert_allclose(heights[:3], heights[0])
+    assert (widths[:3] > heights[0]).all()
+    # Narrower in rows of three or four, so square
+    np.testing.assert_allclose(heights[3:], widths[3:])
+    assert heights[3] < heights[0] and heights[6] < heights[3]
+    # Rows as tall as their axes and margins
+    margins = make_panel_figure(panels_per_row=[1])[0].get_figheight() - heights[0]
+    assert fig.get_figheight() == pytest.approx(
+        heights[[0, 1, 3, 6]].sum() + 4 * margins
+    )
+
+
+def test_make_panel_figure_width():
+    # Three panels across a wide enough figure are as big as two across the default one
+    fig, axes = make_panel_figure(panels_per_row=[3], width=20.7)
+    default_fig, default_axes = make_panel_figure(panels_per_row=[2])
+    np.testing.assert_allclose(
+        fig.get_size_inches(), [20.7, default_fig.get_figheight()]
+    )
+    np.testing.assert_allclose(
+        [_extent_inches(ax=ax) for ax in axes[:2]],
+        [_extent_inches(ax=ax) for ax in default_axes],
     )
     # Only labelled with several panels
-    assert not single_fig.texts
+    assert not make_panel_figure(panels_per_row=[1])[0].texts
 
 
-def test_make_panel_figure_gutters_shift_slots():
-    fig, (ax,) = make_panel_figure(panel_widths=[1])
+def test_make_panel_figure_gutters_shift_panels():
+    fig, (ax,) = make_panel_figure(panels_per_row=[1])
     gutters = {"left": 2, "right": 0.5, "bottom": 1, "top": 0.25}
-    gutter_fig, (gutter_ax,) = make_panel_figure(panel_widths=[1], gutters=gutters)
+    gutter_fig, (gutter_ax,) = make_panel_figure(panels_per_row=[1], gutters=gutters)
     np.testing.assert_allclose(
         gutter_fig.get_size_inches(), fig.get_size_inches() + [2.5, 1.25]
     )
@@ -166,7 +181,7 @@ def test_make_panel_figure_gutters_shift_slots():
 
 
 def test_make_panel_figure_sharey():
-    fig, axes = make_panel_figure(panel_widths=[1, 1, 1, 1], sharey=True)
+    fig, axes = make_panel_figure(panels_per_row=[3, 1], sharey=True)
     for ax in axes[1:]:
         ax.set_yticks([0, 1], labels=["a", "b"])
     fig.canvas.draw()
@@ -177,29 +192,11 @@ def test_make_panel_figure_sharey():
         assert bool(ax.get_yticklabels()) == (idx in (0, 3))
 
 
-def test_make_panel_figure_n_columns():
-    fig, axes = make_panel_figure(panel_widths=[1, 1, None], n_columns=2)
-    # Two slots wide, the last panel filling a row of its own below the first two
-    assert fig.get_figwidth() == pytest.approx(
-        make_panel_figure(panel_widths=[1, 1])[0].get_figwidth()
-    )
-    left, right, _, top = _extent_inches(ax=axes[2])
-    assert left == pytest.approx(_extent_inches(ax=axes[0])[0])
-    assert right == pytest.approx(_extent_inches(ax=axes[1])[1])
-    assert top < _extent_inches(ax=axes[0])[2]
-
-
 def test_make_panel_figure_labels():
-    fig, _ = make_panel_figure(panel_widths=[1, 1, 1], labels=["A.", None, "D."])
+    fig, _ = make_panel_figure(panels_per_row=[2, 1], labels=["A.", None, "D."])
     assert [text.get_text() for text in fig.texts] == ["A.", "D."]
     with pytest.raises(ValueError, match="2 labels for 3 panels"):
-        make_panel_figure(panel_widths=[1, 1, 1], labels=["A.", "B."])
-
-
-@pytest.mark.parametrize(("n_columns", "width"), [(3, 0), (3, 4), (2, 3)])
-def test_make_panel_figure_raises_for_invalid_width(*, n_columns, width):
-    with pytest.raises(ValueError, match="Panel widths"):
-        make_panel_figure(panel_widths=[1, width], n_columns=n_columns)
+        make_panel_figure(panels_per_row=[3], labels=["A.", "B."])
 
 
 @pytest.mark.parametrize(
@@ -214,7 +211,7 @@ def test_plot_densities(
     *, posterior_df_by_model, toy_inputs, param_name, log_x, expected_labels
 ):
     priors = toy_inputs["priors"]
-    fig, (ax,) = make_panel_figure(panel_widths=[1])
+    fig, (ax,) = make_panel_figure(panels_per_row=[1])
     plot_densities(
         ax=ax,
         posterior_df_by_model=posterior_df_by_model,
@@ -245,8 +242,20 @@ def test_plot_densities(
         assert 0.9 < np.trapezoid(line.get_ydata(), axis_x_vec) < 1.01
 
 
+def test_plot_densities_legend_kwargs(*, posterior_df_by_model, toy_inputs):
+    _, (ax,) = make_panel_figure(panels_per_row=[1])
+    plot_densities(
+        ax=ax,
+        posterior_df_by_model=posterior_df_by_model,
+        priors=toy_inputs["priors"],
+        param_name="rep_no_before",
+        legend_kwargs={"handlelength": 1.2},
+    )
+    assert ax.get_legend().handlelength == 1.2
+
+
 def test_plot_densities_without_legend(*, posterior_df_by_model, toy_inputs):
-    _, (ax,) = make_panel_figure(panel_widths=[1])
+    _, (ax,) = make_panel_figure(panels_per_row=[1])
     plot_densities(
         ax=ax,
         posterior_df_by_model=posterior_df_by_model,
@@ -257,35 +266,25 @@ def test_plot_densities_without_legend(*, posterior_df_by_model, toy_inputs):
     assert ax.get_legend() is None
 
 
-def test_plot_model_probabilities():
-    fig, (ax,) = make_panel_figure(panel_widths=[1])
-    plot_model_probabilities(
-        ax=ax, model_probability_by_model={"sse": 0.25, "ssi_so": 0.75}
-    )
-    fig.canvas.draw()
-    (pie_ax,) = ax.child_axes
-    wedges = pie_ax.patches
-    np.testing.assert_allclose(
-        [wedge.theta2 - wedge.theta1 for wedge in wedges], [90, 270]
-    )
-    assert [wedge.get_facecolor() for wedge in wedges] == [
-        matplotlib.colors.to_rgba(_BLUE),
-        matplotlib.colors.to_rgba(_ORANGE),
-    ]
-    assert [text.get_text() for text in ax.get_legend().get_texts()] == [
-        "SSE (0.25)",
-        "SSI-SO (0.75)",
-    ]
-    assert ax.get_legend().get_title().get_text() == "Model probability"
-    assert not ax.get_title()
-    # The legend below the pie, clear of it
-    assert ax.get_legend().get_window_extent().y1 < pie_ax.get_window_extent().y0
-
-
-def test_plot_model_probabilities_inset():
-    fig, (ax,) = make_panel_figure(panel_widths=[1])
+# The box is drawn on a panel in a row of two or, when compact, three, as the comparison
+# figures lay them out
+@pytest.mark.parametrize(("compact", "n_row_panels"), [(False, 2), (True, 3)])
+def test_plot_model_probabilities_inset(*, compact, n_row_panels):
+    # In the figures' style, as whether the box holds its contents depends on their size
+    set_plot_style()
+    fig, axes = make_panel_figure(panels_per_row=[n_row_panels])
+    ax = axes[-1]
+    # As many models as any comparison has, so the legend is as tall as it gets
     plot_model_probabilities_inset(
-        ax=ax, model_probability_by_model={"sse": 1.0, "ssi_so": 0.0}, label="C."
+        ax=ax,
+        model_probability_by_model={
+            "sse": 0.25,
+            "ssi": 0.0,
+            "sse_so": 0.75,
+            "ssi_so": 0.0,
+        },
+        label="C.",
+        compact=compact,
     )
     fig.canvas.draw()
     # A framed box in the upper right of the panel, labelled as a panel of its own
@@ -295,18 +294,41 @@ def test_plot_model_probabilities_inset():
     assert box_position.x0 + box_position.x1 > position.x0 + position.x1
     assert box_position.y0 + box_position.y1 > position.y0 + position.y1
     assert all(spine.get_visible() for spine in box_ax.spines.values())
-    assert [text.get_text() for text in box_ax.texts] == ["C."]
-    # The pie over its legend, with edged wedges, so a model of probability 0 still shows
+    (label,) = box_ax.texts
+    assert label.get_text() == "C."
+    # The pie, with edged wedges, so a model of probability 0 still shows
     (pie_ax,) = box_ax.child_axes
-    assert all(
-        wedge.get_edgecolor() == matplotlib.colors.to_rgba("white")
-        for wedge in pie_ax.patches
+    wedges = pie_ax.patches
+    np.testing.assert_allclose(
+        [wedge.theta2 - wedge.theta1 for wedge in wedges], [90, 0, 270, 0]
     )
-    assert [text.get_text() for text in box_ax.get_legend().get_texts()] == [
-        "SSE (1.00)",
+    assert [wedge.get_facecolor() for wedge in wedges] == [
+        matplotlib.colors.to_rgba(color)
+        for color in (_BLUE, _RED, sns.color_palette("colorblind")[9], _ORANGE)
+    ]
+    assert all(
+        wedge.get_edgecolor() == matplotlib.colors.to_rgba("white") for wedge in wedges
+    )
+    legend = box_ax.get_legend()
+    assert [text.get_text() for text in legend.get_texts()] == [
+        "SSE (0.25)",
+        "SSI (0.00)",
+        "SSE-SO (0.75)",
         "SSI-SO (0.00)",
     ]
-    assert box_ax.get_legend().get_window_extent().y1 < pie_ax.get_window_extent().y0
+    assert legend.get_title().get_text() == "Model probability"
+    # The box holds the pie over its legend, each clear of the other and of the label
+    box_extent, legend_extent, label_extent = (
+        artist.get_window_extent() for artist in (box_ax, legend, label)
+    )
+    pie_extent = matplotlib.transforms.Bbox.union(
+        [wedge.get_window_extent() for wedge in wedges]
+    )
+    for extent in (legend_extent, pie_extent, label_extent):
+        assert box_extent.x0 < extent.x0 and extent.x1 < box_extent.x1
+        assert box_extent.y0 < extent.y0 and extent.y1 < box_extent.y1
+    assert legend_extent.y1 < pie_extent.y0
+    assert label_extent.x1 < pie_extent.x0 or pie_extent.y1 < label_extent.y0
 
 
 def test_plot_fit_gate():
@@ -314,7 +336,7 @@ def test_plot_fit_gate():
     statuses = np.array([["pass", "pass", "unassessed"], ["pass", "fail", "pass"]])
     criteria = ("rhat", "ess_bulk", "ess_tail", "divergences", "tree_depth", "risk")
     fig, criterion_axes = make_panel_figure(
-        panel_widths=[1] * len(criteria), sharey=True, gutters={"bottom": 1}
+        panels_per_row=[3, 3], width=20.7, sharey=True, gutters={"bottom": 1}
     )
     plot_fit_gate(
         axes=criterion_axes,
@@ -384,7 +406,7 @@ def test_plot_fit_gate():
 
 def test_plot_incidence():
     reported_incidence_vec = np.arange(60) % 4
-    _, (ax,) = make_panel_figure(panel_widths=[3])
+    _, (ax,) = make_panel_figure(panels_per_row=[1], width=20.7)
     plot_incidence(
         ax=ax,
         reported_incidence_vec=reported_incidence_vec,
@@ -406,7 +428,7 @@ def test_plot_incidence():
 
 def test_plot_delay_distribution():
     delay = DelayDistribution(prob=np.array([0.2, 0.4, 0.3, 0.1]), first_lag=0)
-    _, (ax,) = make_panel_figure(panel_widths=[1])
+    _, (ax,) = make_panel_figure(panels_per_row=[1])
     plot_delay_distribution(ax=ax, delay=delay, delay_name="tost", max_lag=10)
     bars = ax.patches
     np.testing.assert_allclose(
@@ -420,9 +442,32 @@ def test_plot_delay_distribution():
     assert ax.get_legend() is None
 
 
+def test_plot_delay_distribution_y_ticks_avoid_extra_decimal_place():
+    # A peak just over 0.2 on a panel of the inputs figure's size, which matplotlib would
+    # by default tick every 0.025
+    prob = np.concatenate([[0.178, 0.206, 0.136, 0.1, 0.08], np.full(20, 0.015)])
+    fig, axes = make_panel_figure(panels_per_row=[3], width=20.7)
+    plot_delay_distribution(
+        ax=axes[0],
+        delay=DelayDistribution(prob=prob, first_lag=0),
+        delay_name="tost",
+        max_lag=24,
+    )
+    fig.canvas.draw()
+    # The ticks in view (the locator also gives the first beyond the limits)
+    labels = [
+        label.get_text()
+        for tick, label in zip(
+            axes[0].get_yticks(), axes[0].get_yticklabels(), strict=True
+        )
+        if tick <= axes[0].get_ylim()[1]
+    ]
+    assert labels == ["0.00", "0.05", "0.10", "0.15", "0.20"]
+
+
 def test_plot_delay_distribution_with_overlay():
     overlay = DelayDistribution(prob=np.array([0.25, 0.45, 0.2, 0.1]), first_lag=1)
-    _, (ax,) = make_panel_figure(panel_widths=[1])
+    _, (ax,) = make_panel_figure(panels_per_row=[1])
     plot_delay_distribution(
         ax=ax,
         delay=DelayDistribution(prob=np.array([0.2, 0.5, 0.3]), first_lag=1),
@@ -445,7 +490,7 @@ def test_plot_delay_distribution_colors():
     # Each delay's bars in a colour of its own, translucent so an overlaid line stands out
     colors = []
     for delay_name in ("serial_interval", "inc_period", "tost"):
-        _, (ax,) = make_panel_figure(panel_widths=[1])
+        _, (ax,) = make_panel_figure(panels_per_row=[1])
         plot_delay_distribution(
             ax=ax,
             delay=DelayDistribution(prob=np.array([0.5, 0.5]), first_lag=1),
@@ -460,9 +505,7 @@ def test_plot_delay_distribution_colors():
 
 def test_reported_incidence_bars_alike_in_every_plot():
     reported_incidence_vec = np.arange(60) % 4
-    fig, (incidence_ax, risk_ax, unreported_ax) = make_panel_figure(
-        panel_widths=[1, 1, 1]
-    )
+    fig, (incidence_ax, risk_ax, unreported_ax) = make_panel_figure(panels_per_row=[3])
     plot_incidence(
         ax=incidence_ax,
         reported_incidence_vec=reported_incidence_vec,
@@ -530,7 +573,7 @@ def test_plot_unreported_incidence():
             "probability": 0.5,
         }
     )
-    fig, (ax,) = make_panel_figure(panel_widths=[None], n_columns=2)
+    fig, (ax,) = make_panel_figure(panels_per_row=[1])
     plot_unreported_incidence(
         ax=ax,
         unreported_pmf_df_by_model=dict.fromkeys(model_names, pmf_df),
@@ -664,7 +707,7 @@ def test_plot_risk_incidence_overlay(
 ):
     reported_incidence_vec = np.arange(60) % 4
     vline_days = [34, 70]
-    fig, (ax,) = make_panel_figure(panel_widths=[2])
+    fig, (ax,) = make_panel_figure(panels_per_row=[1])
     plot_risk_incidence_overlay(
         ax=ax,
         risk_df_by_model=risk_df_by_model,

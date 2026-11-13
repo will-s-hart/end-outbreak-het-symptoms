@@ -53,9 +53,11 @@ def make_plots():
     }
     # Every spec is fitted on the same days
     days = next(iter(results_by_spec.values()))["risk_df"]["day"].to_numpy()
-    # A panel per criterion, with gutters for the spec names and the legend
+    # A panel per criterion, in two rows in a figure wide enough (in inches) for the days
+    # along each, with gutters for the spec names and the legend
     gate_fig, gate_axes = make_panel_figure(
-        panel_widths=[1] * len(_DAY_CRITERIA),
+        panels_per_row=[3, 3],
+        width=20.7,
         sharey=True,
         gutters={"left": 2.5, "bottom": 0.8},
     )

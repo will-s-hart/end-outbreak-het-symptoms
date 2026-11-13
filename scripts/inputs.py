@@ -98,9 +98,9 @@ FIG_EXTENSIONS = ("svg", "png")
 DATA_PATH = pathlib.Path("data/equateur_2018_onsets.csv")
 
 # Each comparison's figures, by name, each with any of these panels, in this order: the prior
-# and posterior densities of each of param_names, followed by the model probabilities; the
-# unreported cases each day on the comparison day, if unreported; and the risks of
-# risk_types
+# and posterior densities of each of param_names, which end with rep_no_after, whose panel
+# has the model probabilities in a box; the unreported cases each day on the comparison day,
+# if unreported; and the risks of risk_types
 COMPARISON_SPECS: dict[str, dict[str, Any]] = {
     "naive_models_fixed_dispersion": {
         "model_spec_names": [
@@ -123,7 +123,7 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
         ],
         "figures": {
             "summary": {
-                "param_names": ("rep_no_before", "rep_no_after", "dispersion"),
+                "param_names": ("dispersion", "rep_no_before", "rep_no_after"),
                 "risk_types": ("cases",),
             },
         },
@@ -152,7 +152,7 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
         ],
         "figures": {
             "summary": {
-                "param_names": ("rep_no_before", "rep_no_after", "dispersion"),
+                "param_names": ("dispersion", "rep_no_before", "rep_no_after"),
                 "risk_types": ("cases", "transmission"),
             },
         },

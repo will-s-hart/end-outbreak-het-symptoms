@@ -22,9 +22,10 @@ def make_plots():
         delay_name: DelayDistribution.from_df(df=pd.read_csv(path))
         for delay_name, path in inputs["delay_distributions_results_paths"].items()
     }
-    # The incidence across the top, above the delay distributions
+    # The incidence across the top, above the delay distributions, in a figure wide enough
+    # (in inches) for their panels to be as tall as the incidence's
     fig, (incidence_ax, serial_interval_ax, inc_period_ax, tost_ax) = make_panel_figure(
-        panel_widths=[None, 1, 1, 1]
+        panels_per_row=[1, 3], width=20.7
     )
     plot_incidence(
         ax=incidence_ax,

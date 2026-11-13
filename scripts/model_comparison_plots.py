@@ -6,7 +6,6 @@ from endoutbreakhet import compute_model_probabilities
 from endoutbreakhet.plotting import (
     make_panel_figure,
     plot_densities,
-    plot_model_probabilities,
     plot_model_probabilities_inset,
     plot_risk_incidence_overlay,
     plot_unreported_incidence,
@@ -14,6 +13,10 @@ from endoutbreakhet.plotting import (
     set_plot_style,
 )
 from scripts.inputs import COMPARISON_SPECS, get_inputs_model_comparison_plots
+
+# Three density panels in a row are small, so their legend's line samples are shorter, to
+# keep it clear of the densities
+_THREE_DENSITY_LEGEND_KWARGS = {"handlelength": 1.2}
 
 
 def make_plots(*, comparison_spec_name):
@@ -55,28 +58,36 @@ def _make_figure(
     unreported_plot_end_date,
     incidence_kwargs,
 ):
-    # A column per density panel (but at least two), with the densities and model
-    # probabilities a column wide and the unreported cases and risks filling the rest of
-    # their row. R_after's densities leave the upper right of their panel empty, so model
-    # probabilities following them go in a box there instead, labelled as a panel of its own
-    probabilities_inset = param_names[-1:] == ("rep_no_after",)
-    n_narrow = len(param_names) + (bool(param_names) and not probabilities_inset)
+    # The densities share a row, and the unreported cases and risks each fill a row of
+    # their own. R_after's densities leave the upper right of their panel empty, so they
+    # come last, with the model probabilities in a box there, labelled as a panel of its
+    # own. Three densities are in smaller panels, with a box to fit
+    if param_names and param_names[-1] != "rep_no_after":
+        raise ValueError(
+            "The model probabilities go in a box on R_after's densities, so param_names "
+            f"must end with rep_no_after: {param_names}"
+        )
+    n_densities = len(param_names)
     n_wide = unreported + bool(risk_types)
-    n_labels = n_narrow + n_wide + probabilities_inset
+    n_labels = n_densities + bool(param_names) + n_wide
     labels = (
         [f"{chr(ord('A') + idx)}." for idx in range(n_labels)]
         if n_labels > 1
         else [None]
     )
-    inset_label = labels.pop(len(param_names)) if probabilities_inset else None
+    inset_label = labels.pop(n_densities) if param_names else None
+    compact = n_densities > 2
     fig, axes = make_panel_figure(
-        panel_widths=[1] * n_narrow + [None] * n_wide,
-        n_columns=max(2, len(param_names)),
-        labels=labels,
+        panels_per_row=[n_densities] * bool(param_names) + [1] * n_wide, labels=labels
     )
 
+    # The legend goes on R_before's densities if there are any, as k's leave it no room and
+    # R_after's have the box
+    legend_idx = (
+        param_names.index("rep_no_before") if "rep_no_before" in param_names else 0
+    )
     for idx, (ax, param_name) in enumerate(
-        zip(axes[: len(param_names)], param_names, strict=True)
+        zip(axes[:n_densities], param_names, strict=True)
     ):
         plot_densities(
             ax=ax,
@@ -84,9 +95,10 @@ def _make_figure(
             priors=priors,
             param_name=param_name,
             log_x=(param_name == "dispersion"),
-            legend=(idx == 0),
+            legend=(idx == legend_idx),
+            legend_kwargs=_THREE_DENSITY_LEGEND_KWARGS if compact else None,
         )
-    other_axes = iter(axes[len(param_names) :])
+    other_axes = iter(axes[n_densities:])
     if param_names:
         model_probability_by_model = compute_model_probabilities(
             log_evidence_by_model={
@@ -95,17 +107,12 @@ def _make_figure(
             },
             prior_probability_by_model=None,
         )
-        if probabilities_inset:
-            plot_model_probabilities_inset(
-                ax=axes[len(param_names) - 1],
-                model_probability_by_model=model_probability_by_model,
-                label=inset_label,
-            )
-        else:
-            plot_model_probabilities(
-                ax=next(other_axes),
-                model_probability_by_model=model_probability_by_model,
-            )
+        plot_model_probabilities_inset(
+            ax=axes[n_densities - 1],
+            model_probability_by_model=model_probability_by_model,
+            label=inset_label,
+            compact=compact,
+        )
     if unreported:
         plot_unreported_incidence(
             ax=next(other_axes),

@@ -9,21 +9,40 @@ import seaborn as sns
 
 from endoutbreakhet.utils import parse_lognormal_prior
 
-# Figures are panels in a grid of slots (by default three columns), each panel spanning one or
-# more slots of a row. Axes margins within the slots are in inches rather than fractions of
-# the figure, so a panel's axes line up with those of the panels in the same slots above and
-# below it, whatever its width. The figure has a margin of its own on the right, for a twin y
-# axis on a panel in the last column
-_DEFAULT_N_COLUMNS = 3
-_SLOT_SIZE = (6.7, 6.5)
-_AXES_MARGINS = {"left": 1.0, "right": 0.3, "bottom": 0.8, "top": 0.4}
+# Figures are rows of panels. A figure has a width, which the panels of each row share
+# equally, so every row starts and ends in line with the others. A panel's axes sit within
+# its share at margins in inches, the left one holding the y tick labels and axis label, with
+# the panel's label above them. The axes are _AXES_HEIGHT tall, or square if that would make
+# them taller than wide, so panels sharing a row with many others don't end up as slivers.
+# The figure has a margin of its own on the right, for a twin y axis on a row's last panel
+_FIGURE_WIDTH = 14.0
+_AXES_HEIGHT = 5.3
+_AXES_MARGINS = {"left": 0.85, "right": 0.3, "bottom": 0.8, "top": 0.4}
 _FIGURE_RIGHT_MARGIN = 0.6
-# From the top-left corner of a panel's first slot to the start of its label's baseline
+# From the top-left corner of a panel to the start of its label's baseline
 _PANEL_LABEL_OFFSET = (0.07, 0.28)
 _PANEL_LABEL_SIZE = 20
-# The box for the model probabilities inset in another panel, in that panel's axes fraction:
-# its upper right, which R_after's densities leave empty
-_MODEL_PROBABILITIES_INSET_BOUNDS = (0.33, 0.22, 0.65, 0.76)
+# The box for the model probabilities inset in another panel, in that panel's upper right,
+# which R_after's densities leave empty: the box's bounds in the panel's axes fraction, the
+# pie's in the box's, the pie's radius, the gap around the legend below the pie (in font
+# sizes) and how far across the box its label starts. The compact layout fits a panel in a
+# row of three, with a smaller pie beside the label rather than below it
+_MODEL_PROBABILITIES_INSET_LAYOUTS = {
+    "standard": {
+        "box_bounds": (0.33, 0.22, 0.65, 0.76),
+        "pie_bounds": (0, 0.46, 1, 0.5),
+        "pie_radius": 1,
+        "legend_pad": 0.5,
+        "label_x": 0.02,
+    },
+    "compact": {
+        "box_bounds": (0.327, 0.176, 0.663, 0.814),
+        "pie_bounds": (0.2, 0.61, 0.6, 0.37),
+        "pie_radius": 1.2,
+        "legend_pad": 0.35,
+        "label_x": 0.03,
+    },
+}
 
 # Seaborn's colorblind palette, by hue
 _COLORS = dict(
@@ -140,78 +159,87 @@ def set_plot_style():
 
 
 def make_panel_figure(
-    *,
-    panel_widths,
-    n_columns=_DEFAULT_N_COLUMNS,
-    labels=None,
-    sharey=False,
-    gutters=None,
+    *, panels_per_row, width=_FIGURE_WIDTH, labels=None, sharey=False, gutters=None
 ):
-    # A figure of panels filling rows of n_columns slots in order, and the panels' axes. Each
-    # panel spans its width in slots or, for a width of None, the rest of its row (a whole
-    # row if it starts one). Panels are labelled "A.", "B.", ... unless there is just one, or
-    # by labels (None for no label). With sharey, the panels share the first's y axis,
-    # labelled only on panels starting a row. gutters adds space (in inches, by side) around
-    # the slots for figure-level decorations
+    # A figure width inches wide of rows of panels, panels_per_row giving the number in each
+    # row, and the panels' axes in order. A row's panels share the width equally, and their
+    # axes are _AXES_HEIGHT tall, or square if narrower than that. Panels are labelled "A.",
+    # "B.", ... unless there is just one, or by labels (None for no label). With sharey, the
+    # panels share the first's y axis, labelled only on panels starting a row. gutters adds
+    # space (in inches, by side) around the panels for figure-level decorations
+    n_panels = sum(panels_per_row)
     if labels is None:
         labels = (
-            [f"{chr(ord('A') + idx)}." for idx in range(len(panel_widths))]
-            if len(panel_widths) > 1
+            [f"{chr(ord('A') + idx)}." for idx in range(n_panels)]
+            if n_panels > 1
             else [None]
         )
-    if len(labels) != len(panel_widths):
-        raise ValueError(
-            f"Got {len(labels)} labels for {len(panel_widths)} panels: {labels}"
-        )
+    if len(labels) != n_panels:
+        raise ValueError(f"Got {len(labels)} labels for {n_panels} panels: {labels}")
     gutters = dict.fromkeys(("left", "right", "bottom", "top"), 0) | (gutters or {})
-    rows = _pack_rows(panel_widths=panel_widths, n_columns=n_columns)
-    slot_width, slot_height = _SLOT_SIZE
-    fig_width = (
-        gutters["left"]
-        + max(sum(width for _, width in row) for row in rows) * slot_width
-        + _FIGURE_RIGHT_MARGIN
-        + gutters["right"]
-    )
-    fig_height = gutters["top"] + len(rows) * slot_height + gutters["bottom"]
+    panel_widths = [
+        (width - _FIGURE_RIGHT_MARGIN) / n_row_panels for n_row_panels in panels_per_row
+    ]
+    axes_widths = [
+        panel_width - _AXES_MARGINS["left"] - _AXES_MARGINS["right"]
+        for panel_width in panel_widths
+    ]
+    axes_heights = [min(_AXES_HEIGHT, axes_width) for axes_width in axes_widths]
+    row_heights = [
+        _AXES_MARGINS["top"] + axes_height + _AXES_MARGINS["bottom"]
+        for axes_height in axes_heights
+    ]
+    fig_width = gutters["left"] + width + gutters["right"]
+    fig_height = gutters["top"] + sum(row_heights) + gutters["bottom"]
     fig = plt.figure(figsize=(fig_width, fig_height))
     axes = []
-    for row_idx, row in enumerate(rows):
-        # In inches from the bottom of the figure, as are the positions below
-        row_top = fig_height - gutters["top"] - row_idx * slot_height
-        for first_slot, width in row:
-            slot_left = gutters["left"] + first_slot * slot_width
+    # In inches from the bottom of the figure, as are the positions below
+    row_top = fig_height - gutters["top"]
+    for n_row_panels, panel_width, axes_width, axes_height, row_height in zip(
+        panels_per_row,
+        panel_widths,
+        axes_widths,
+        axes_heights,
+        row_heights,
+        strict=True,
+    ):
+        for row_idx in range(n_row_panels):
+            panel_left = gutters["left"] + row_idx * panel_width
             ax = fig.add_axes(
                 (
-                    (slot_left + _AXES_MARGINS["left"]) / fig_width,
-                    (row_top - slot_height + _AXES_MARGINS["bottom"]) / fig_height,
-                    (
-                        width * slot_width
-                        - _AXES_MARGINS["left"]
-                        - _AXES_MARGINS["right"]
-                    )
-                    / fig_width,
-                    (slot_height - _AXES_MARGINS["bottom"] - _AXES_MARGINS["top"])
-                    / fig_height,
+                    (panel_left + _AXES_MARGINS["left"]) / fig_width,
+                    (row_top - row_height + _AXES_MARGINS["bottom"]) / fig_height,
+                    axes_width / fig_width,
+                    axes_height / fig_height,
                 ),
                 sharey=axes[0] if sharey and axes else None,
             )
-            if sharey and first_slot > 0:
+            if sharey and row_idx > 0:
                 ax.tick_params(labelleft=False)
             if (label := labels[len(axes)]) is not None:
                 fig.text(
-                    slot_left + _PANEL_LABEL_OFFSET[0],
+                    panel_left + _PANEL_LABEL_OFFSET[0],
                     row_top - _PANEL_LABEL_OFFSET[1],
                     label,
                     fontsize=_PANEL_LABEL_SIZE,
                     transform=fig.dpi_scale_trans,
                 )
             axes.append(ax)
+        row_top -= row_height
     return fig, axes
 
 
 def plot_densities(
-    *, ax, posterior_df_by_model, priors, param_name, log_x=False, legend=True
+    *,
+    ax,
+    posterior_df_by_model,
+    priors,
+    param_name,
+    log_x=False,
+    legend=True,
+    legend_kwargs=None,
 ):
+    # legend_kwargs go to the legend, e.g. to fit it in a small panel
     lognormal_params = parse_lognormal_prior(name=param_name, priors=priors)
     prior_dist = scipy.stats.lognorm(
         s=lognormal_params["sigma"], scale=np.exp(lognormal_params["mu"])
@@ -264,37 +292,43 @@ def plot_densities(
     ax.set_ylabel("Density")
 
     if legend:
-        ax.legend()
+        ax.legend(**(legend_kwargs or {}))
 
 
-def plot_model_probabilities(*, ax, model_probability_by_model):
-    # The pie in an inset across the top of the panel and its legend below, so they never
-    # overlap whatever the panel's shape
-    ax.axis("off")
-    _plot_model_probability_pie(
-        pie_ax=ax.inset_axes((0, 0.3, 1, 0.7)),
-        legend_ax=ax,
-        model_probability_by_model=model_probability_by_model,
-        loc="lower center",
-    )
-
-
-def plot_model_probabilities_inset(*, ax, model_probability_by_model, label):
-    # In a framed box in the upper right of ax's panel, labelled as a panel of its own, with
-    # the pie over its legend as in plot_model_probabilities
-    box_ax = ax.inset_axes(_MODEL_PROBABILITIES_INSET_BOUNDS)
+def plot_model_probabilities_inset(
+    *, ax, model_probability_by_model, label, compact=False
+):
+    # A pie of the models' probabilities over its legend, which gives each model's, in a
+    # framed box in the upper right of ax's panel, labelled as a panel of its own. compact
+    # fits the box to a panel in a row of three. The wedges are edged, so a
+    # pie of one model and others of probability near 0 still shows its divisions
+    layout = _MODEL_PROBABILITIES_INSET_LAYOUTS["compact" if compact else "standard"]
+    box_ax = ax.inset_axes(layout["box_bounds"])
     box_ax.set_xticks([])
     box_ax.set_yticks([])
     for spine in box_ax.spines.values():
         spine.set_visible(True)
-    _plot_model_probability_pie(
-        pie_ax=box_ax.inset_axes((0, 0.46, 1, 0.5)),
-        legend_ax=box_ax,
-        model_probability_by_model=model_probability_by_model,
+    pie = box_ax.inset_axes(layout["pie_bounds"]).pie(
+        list(model_probability_by_model.values()),
+        colors=[
+            _MODEL_STYLES[model_name]["color"]
+            for model_name in model_probability_by_model
+        ],
+        wedgeprops={"edgecolor": "white", "linewidth": 1},
+        radius=layout["pie_radius"],
+    )
+    box_ax.legend(
+        pie.wedges,
+        [
+            f"{_MODEL_STYLES[model_name]['label']} ({prob:.2f})"
+            for model_name, prob in model_probability_by_model.items()
+        ],
+        title="Model probability",
         loc="lower center",
+        borderaxespad=layout["legend_pad"],
     )
     box_ax.text(
-        0.02,
+        layout["label_x"],
         0.97,
         label,
         transform=box_ax.transAxes,
@@ -492,6 +526,11 @@ def plot_delay_distribution(
         ax.legend(handles=[bars, line])
     ax.set_xlim(-0.5, max_lag + 0.5)
     ax.set_ylim(bottom=0)
+    # The default tick steps without 2.5, whose labels take a decimal place more than their
+    # neighbours' (0.025 between 0.02 and 0.05) and so more of the margin
+    ax.yaxis.set_major_locator(
+        matplotlib.ticker.MaxNLocator(nbins="auto", steps=[1, 2, 5, 10])
+    )
     ax.set_xlabel(_DELAY_XLABELS[delay_name])
     ax.set_ylabel("Probability")
 
@@ -591,51 +630,6 @@ def save_figure(*, fig, paths):
         path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(path)
     plt.close(fig)
-
-
-def _pack_rows(*, panel_widths, n_columns):
-    # Each row's panels as (first slot, width in slots), a panel starting a new row when it
-    # doesn't fit in the current one
-    rows = [[]]
-    n_used = 0
-    for width in panel_widths:
-        if n_used and (1 if width is None else width) > n_columns - n_used:
-            rows.append([])
-            n_used = 0
-        if width is None:
-            width = n_columns - n_used
-        if not 1 <= width <= n_columns:
-            raise ValueError(
-                f"Panel widths must be from 1 to {n_columns} slots, not {width}"
-            )
-        rows[-1].append((n_used, width))
-        n_used += width
-    return rows
-
-
-def _plot_model_probability_pie(
-    *, pie_ax, legend_ax, model_probability_by_model, **legend_kwargs
-):
-    # The pie on pie_ax, with its legend, giving each model's probability, on legend_ax. The
-    # wedges are edged, so a pie of one model and others of probability near 0 still shows
-    # its divisions
-    pie = pie_ax.pie(
-        list(model_probability_by_model.values()),
-        colors=[
-            _MODEL_STYLES[model_name]["color"]
-            for model_name in model_probability_by_model
-        ],
-        wedgeprops={"edgecolor": "white", "linewidth": 1},
-    )
-    legend_ax.legend(
-        pie.wedges,
-        [
-            f"{_MODEL_STYLES[model_name]['label']} ({prob:.2f})"
-            for model_name, prob in model_probability_by_model.items()
-        ],
-        title="Model probability",
-        **legend_kwargs,
-    )
 
 
 def _month_start_x_axis(*, ax, day_0_date, plot_days, interval_months=1):

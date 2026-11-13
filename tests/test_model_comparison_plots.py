@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from endoutbreakhet.plotting import make_panel_figure
 from scripts import model_comparison_plots
 from scripts.inputs import COMPARISON_SPECS, get_inputs_model_comparison_plots
 
@@ -92,28 +93,36 @@ def test_make_plots_writes_figures(*, comparison_spec_name, tmp_path, monkeypatc
             [[0, 1], [2], [3]],
             ["A.", "B.", "D.", "E."],
             [
-                ("densities", 0, ("rep_no_before", False, True)),
-                ("densities", 1, ("rep_no_after", False, False)),
-                ("model_probabilities_inset", 1, ("C.",)),
+                ("densities", 0, ("rep_no_before", False, True, None)),
+                ("densities", 1, ("rep_no_after", False, False, None)),
+                ("model_probabilities_inset", 1, ("C.", False)),
                 ("unreported", 2, ()),
                 ("risk", 3, (("cases", "transmission"),)),
             ],
         ),
-        # A column per density panel, then model probabilities in a panel of their own
+        # A column per density panel, with the legend on R_before's and a compact box
         (
             {
-                "param_names": ("rep_no_before", "rep_no_after", "dispersion"),
+                "param_names": ("dispersion", "rep_no_before", "rep_no_after"),
                 "unreported": False,
                 "risk_types": ("cases",),
             },
-            [[0, 1, 2], [3, 4]],
-            ["A.", "B.", "C.", "D.", "E."],
+            [[0, 1, 2], [3]],
+            ["A.", "B.", "C.", "E."],
             [
-                ("densities", 0, ("rep_no_before", False, True)),
-                ("densities", 1, ("rep_no_after", False, False)),
-                ("densities", 2, ("dispersion", True, False)),
-                ("model_probabilities", 3, ()),
-                ("risk", 4, (("cases",),)),
+                ("densities", 0, ("dispersion", True, False, {"handlelength": 1.2})),
+                (
+                    "densities",
+                    1,
+                    ("rep_no_before", False, True, {"handlelength": 1.2}),
+                ),
+                (
+                    "densities",
+                    2,
+                    ("rep_no_after", False, False, {"handlelength": 1.2}),
+                ),
+                ("model_probabilities_inset", 2, ("D.", True)),
+                ("risk", 3, (("cases",),)),
             ],
         ),
         (
@@ -145,9 +154,16 @@ def test_make_figure_layout(
         return _plot
 
     for plot_name, kind, arg_names in (
-        ("plot_densities", "densities", ("param_name", "log_x", "legend")),
-        ("plot_model_probabilities", "model_probabilities", ()),
-        ("plot_model_probabilities_inset", "model_probabilities_inset", ("label",)),
+        (
+            "plot_densities",
+            "densities",
+            ("param_name", "log_x", "legend", "legend_kwargs"),
+        ),
+        (
+            "plot_model_probabilities_inset",
+            "model_probabilities_inset",
+            ("label", "compact"),
+        ),
         ("plot_unreported_incidence", "unreported", ()),
         ("plot_risk_incidence_overlay", "risk", ("risk_types",)),
     ):
@@ -179,8 +195,31 @@ def test_make_figure_layout(
     row_right = max(ax.get_position().x1 for ax in fig.axes)
     for row in expected_rows:
         assert fig.axes[row[-1]].get_position().x1 == pytest.approx(row_right)
+    # As wide however many densities there are, three of them in a shorter row
+    assert fig.get_figwidth() == pytest.approx(
+        make_panel_figure(panels_per_row=[1])[0].get_figwidth()
+    )
+    heights = [ax.get_position().height for ax in fig.axes]
+    if len(figure["param_names"]) > 2:
+        assert max(heights[:3]) < heights[3]
+    else:
+        assert heights == pytest.approx([heights[0]] * len(heights))
     assert [text.get_text() for text in fig.texts] == expected_labels
     assert [
         (kind, fig.axes.index(ax), args) for kind, ax, args in calls
     ] == expected_calls
     plt.close(fig)
+
+
+def test_make_figure_raises_unless_rep_no_after_last():
+    # The model probabilities' box needs R_after's panel
+    with pytest.raises(ValueError, match="must end with rep_no_after"):
+        model_comparison_plots._make_figure(
+            param_names=("rep_no_after", "dispersion"),
+            unreported=False,
+            risk_types=(),
+            df_by_model_by_result={},
+            priors={},
+            unreported_plot_end_date=None,
+            incidence_kwargs={},
+        )

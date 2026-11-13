@@ -64,6 +64,8 @@ def test_comparison_specs_valid(*, comparison_spec_name):
         # Non-empty tuples (a missing trailing comma would leave a bare string)
         for key in figure.keys() & {"param_names", "risk_types"}:
             assert isinstance(figure[key], tuple) and figure[key]
+        # R_after's densities last, as their panel has the model probabilities' box
+        assert figure.get("param_names", ("rep_no_after",))[-1] == "rep_no_after"
         # Given only to add the panel
         assert figure.get("unreported", True) is True
         # Risk types every model in the comparison records
