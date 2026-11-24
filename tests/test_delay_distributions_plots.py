@@ -49,9 +49,9 @@ def test_implied_serial_interval():
     np.testing.assert_allclose(implied.prob, [0.25, 0.5, 0.25])
 
 
-def test_implied_serial_interval_matches_naive_moments():
+def test_implied_serial_interval_matches_input_moments():
     # The TOST's mean and variance are those of the serial interval less those of the
-    # incubation period, so the implied serial interval should nearly match the naive one
+    # incubation period, so the implied serial interval should nearly match the input one
     delay_by_name = {
         delay_name: DelayDistribution.from_df(df=pd.read_csv(path))
         for delay_name, path in get_inputs_delay_distributions_plots()[
@@ -61,8 +61,8 @@ def test_implied_serial_interval_matches_naive_moments():
     implied = delay_distributions_plots._implied_serial_interval(
         tost=delay_by_name["tost"], inc_period=delay_by_name["inc_period"]
     )
-    naive = delay_by_name["serial_interval"]
+    serial_interval = delay_by_name["serial_interval"]
     for moment in (1, 2):
         assert np.sum(implied.lags**moment * implied.prob) == pytest.approx(
-            np.sum(naive.lags**moment * naive.prob), rel=1e-3
+            np.sum(serial_interval.lags**moment * serial_interval.prob), rel=1e-3
         )

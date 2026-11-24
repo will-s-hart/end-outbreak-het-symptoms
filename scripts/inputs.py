@@ -102,7 +102,7 @@ DATA_PATH = pathlib.Path("data/equateur_2018_onsets.csv")
 # has the model probabilities in a box; the unreported cases each day on the comparison day,
 # if unreported; and the risks of risk_types
 COMPARISON_SPECS: dict[str, dict[str, Any]] = {
-    "naive_models_fixed_dispersion": {
+    "serial_interval_based_models_fixed_dispersion": {
         "model_spec_names": [
             "sse_fixed_dispersion",
             "ssi_fixed_dispersion",
@@ -115,7 +115,7 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             },
         },
     },
-    "naive_models_estimated_dispersion": {
+    "serial_interval_based_models_estimated_dispersion": {
         "model_spec_names": [
             "sse_estimated_dispersion",
             "ssi_estimated_dispersion",
@@ -128,7 +128,7 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             },
         },
     },
-    "naive_vs_so_fixed_dispersion": {
+    "serial_interval_based_vs_so_fixed_dispersion": {
         "model_spec_names": [
             "sse_fixed_dispersion",
             "ssi_fixed_dispersion",
@@ -143,7 +143,7 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             "risk_sustained": {"risk_types": ("sustained",)},
         },
     },
-    "naive_vs_so_estimated_dispersion": {
+    "serial_interval_based_vs_so_estimated_dispersion": {
         "model_spec_names": [
             "sse_estimated_dispersion",
             "ssi_estimated_dispersion",
@@ -171,7 +171,7 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             },
         },
     },
-    "naive_vs_so_60_pc_reporting": {
+    "serial_interval_based_vs_so_60_pc_reporting": {
         "model_spec_names": [
             "sse_60_pc_reporting",
             "ssi_60_pc_reporting",
@@ -186,7 +186,7 @@ COMPARISON_SPECS: dict[str, dict[str, Any]] = {
             },
         },
     },
-    "naive_vs_so_80_pc_reporting": {
+    "serial_interval_based_vs_so_80_pc_reporting": {
         "model_spec_names": [
             "sse_80_pc_reporting",
             "ssi_80_pc_reporting",

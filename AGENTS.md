@@ -31,8 +31,9 @@ diagnostics (R̂, bulk/tail ESS, divergences, draws at the maximum tree depth).
 blocking anything downstream. Each comparison spec (`COMPARISON_SPECS` in `inputs.py`) lists
 its figures, each by the panels it has (densities with model probabilities, unreported cases,
 risks, in that order), which `model_comparison_plots` lays out. `overview_plots` draws the
-reported incidence above two schematics, of the superspreading models and of the naive
-against the SO models, drawn in matplotlib like every other figure. Keep this file in step
+reported incidence above two schematics, of the superspreading models and of the serial
+interval-based against the SO models, drawn in matplotlib like every other figure. Keep
+this file in step
 as more land:
 describe what exists, not what is planned.
 

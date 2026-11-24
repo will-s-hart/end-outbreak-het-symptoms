@@ -33,15 +33,16 @@
 \(C_t\) denotes the number of symptom onsets (cases) on day \(t\),
 reported or not (Section~\ref{sec:reporting}). Infection counts \(I_t\)
 and infectiousness variables \(Y_t,Z_t\), where present, are latent.
-Naive models identify transmission and case events without explicitly
-modelling incubation. Every infection eventually produces symptoms,
+Serial interval-based models identify transmission and case events without
+explicitly modelling incubation. Every infection eventually produces symptoms,
 and there are no future importations. Distributional statements below
 specify sequential conditional models, with conditioning on the relevant
 history suppressed.
 
-The normalized delay PMFs are \(w_s\) (naive-model serial interval),
-\(\incPMF_s\) (incubation period), and \(\tostPMF_s\) (time from
-symptom onset to transmission), with supports \(1,\ldots,m\),
+The normalized delay PMFs are \(w_s\) (serial interval, used only by
+serial interval-based models), \(\incPMF_s\) (incubation period), and
+\(\tostPMF_s\) (time from symptom onset to transmission), with supports
+\(1,\ldots,m\),
 \(1,\ldots,m_{\mathrm{inc}}\), and \(0,\ldots,m_{\mathrm{tost}}\),
 respectively. For integer \(a\geq0\), their CDFs are
 \begin{equation}
@@ -131,8 +132,8 @@ Call cases with onset by \(t\) existing and those with onset after \(t\)
 future. Let \(N_t^{(\mathrm{rem})}\) count direct infections after \(t\)
 by existing cases, and \(N_t^{(\mathrm{inc})}\) count individuals infected
 by \(t\) whose onsets are after \(t\) (whose infectors are existing cases,
-by nonnegative TOST). Naive models identify transmission with onset, so
-\(N_t^{(\mathrm{inc})}=0\) there. Then
+by nonnegative TOST). Serial interval-based models identify transmission
+with onset, so \(N_t^{(\mathrm{inc})}=0\) there. Then
 \(N_t=N_t^{(\mathrm{rem})}+N_t^{(\mathrm{inc})}\) counts future cases
 directly infected by existing cases, and every future case is one of these
 or a descendant of one. In each SO model, \(N_t^{(\mathrm{rem})}\) and
@@ -163,15 +164,16 @@ and the formulae below do not apply. We give only its
 No future case occurs if and only if \(N_t=0\), so
 \begin{align}
   \RAC(t)&=1-\Prob{N_t^{(\mathrm{rem})}=0}
-  &&\text{(naive models)},\\
+  &&\text{(serial interval-based models)},\\
   \RAC(t)&=1-\Prob{N_t^{(\mathrm{rem})}=0}\Prob{N_t^{(\mathrm{inc})}=0}
   &&\text{(SO models)}.
 \end{align}
 
 \subsection{Risk of additional transmission}
 
-In naive models, \(\RAT(t)=\RAC(t)\). In SO models, each infection counted
-by \(N_t^{(\mathrm{rem})}\) is a transmission after \(t\), while each
+In serial interval-based models, \(\RAT(t)=\RAC(t)\). In SO models, each
+infection counted by \(N_t^{(\mathrm{rem})}\) is a transmission after
+\(t\), while each
 individual counted by \(N_t^{(\mathrm{inc})}\) transmits after \(t\) unless
 it has no offspring. Conditioning on \(N_t^{(\mathrm{inc})}\) therefore
 gives
@@ -192,7 +194,7 @@ and only if \(\Rfut\leq1\). Transmission dies out if and only if every
 lineage does, so \(\RST(t)=1-\E{q^{N_t}}\), i.e.
 \begin{align}
   \RST(t)&=1-G_t^{(\mathrm{rem})}(q)
-  &&\text{(naive models)},\\
+  &&\text{(serial interval-based models)},\\
   \RST(t)&=1-G_t^{(\mathrm{rem})}(q)G_t^{(\mathrm{inc})}(q)
   &&\text{(SO models)}.
 \end{align}
@@ -210,7 +212,7 @@ no reported case in the first \(n\) generations, so it would be the largest
 root if there were several, as at \(\rho=0\).) As for \(\RST(t)\),
 \begin{align}
   \RAR(t)&=1-G_t^{(\mathrm{rem})}(q_\rho)
-  &&\text{(naive models)},\\
+  &&\text{(serial interval-based models)},\\
   \RAR(t)&=1-G_t^{(\mathrm{rem})}(q_\rho)G_t^{(\mathrm{inc})}(q_\rho)
   &&\text{(SO models)}.
 \end{align}
@@ -432,7 +434,7 @@ would be nearly uniform on \([0,1)\), which a normal proposal fits poorly.
 The CDF-based construction above avoids this repeated mismatch across the
 many days with small counts.
 
-\section{Naive models}
+\section{Serial interval-based models}
 \subsection{Poisson model}
 \subsubsection{Model definition}
 

@@ -63,7 +63,7 @@ def risk_df_by_model():
     days = np.arange(40, 80)
     risk_cases_vec = np.linspace(0.9, 0.1, len(days))
     return {
-        # Naive model risks of cases and transmission coincide
+        # Serial interval-based model risks of cases and transmission coincide
         "sse": pd.DataFrame(
             {
                 "day": days,
@@ -510,7 +510,7 @@ def test_plot_delay_distribution_with_overlay():
         delay=DelayDistribution(prob=np.array([0.2, 0.5, 0.3]), first_lag=1),
         delay_name="serial_interval",
         max_lag=10,
-        label="Naive models",
+        label="Serial interval-based models",
         overlay=overlay,
         overlay_label="SO models (implied)",
     )
@@ -518,7 +518,7 @@ def test_plot_delay_distribution_with_overlay():
     np.testing.assert_array_equal(line.get_xdata(), overlay.lags)
     np.testing.assert_array_equal(line.get_ydata(), overlay.prob)
     assert [text.get_text() for text in ax.get_legend().get_texts()] == [
-        "Naive models",
+        "Serial interval-based models",
         "SO models (implied)",
     ]
     # In a colour no delay has, so not read as one of them
@@ -716,8 +716,8 @@ def test_plot_unreported_incidence():
             ],
             "Risk",
         ),
-        # Naive models' risks of sustained transmission and reports differ from that of
-        # cases, so get their own curves
+        # Serial interval-based models' risks of sustained transmission and reports differ
+        # from that of cases, so get their own curves
         (
             ("sustained",),
             [("sse", "sustained", "SSE", "-"), ("sse_so", "sustained", "SSE-SO", "-")],
@@ -733,7 +733,8 @@ def test_plot_unreported_incidence():
             ],
             "Risk",
         ),
-        # Without the risk of cases alongside, naive models show that of transmission
+        # Without the risk of cases alongside, serial interval-based models show that of
+        # transmission
         (
             ("transmission",),
             [

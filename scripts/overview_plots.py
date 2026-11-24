@@ -273,9 +273,9 @@ def _draw_person(*, ax, x, y, color):
 
 
 def _plot_onset_anchoring_schematic(*, ax, delay_means):
-    # An infector and their infectee on a time axis, as the naive models (above) and the SO
-    # models (below) read the same two onsets, with each delay's arrow as long as its mean
-    # (delay_means, by delay)
+    # An infector and their infectee on a time axis, as the serial interval-based models
+    # (above) and the SO models (below) read the same two onsets, with each delay's arrow
+    # as long as its mean (delay_means, by delay)
     width, height = _schematic_axes(ax=ax)
     text_size = plt.rcParams["legend.fontsize"]
     # The models' names and descriptions take the left, the time axes the rest, with room
@@ -288,12 +288,28 @@ def _plot_onset_anchoring_schematic(*, ax, delay_means):
         * delay_means["tost"]
         / delay_means["serial_interval"]
     )
-    naive_y, so_y = height - 0.6, 0.7
+    serial_interval_based_y, so_y = height - 0.6, 0.7
+    # Each name over two lines, ending just above its description
     for y, name, description in (
-        (naive_y, "Naive models", "Onset dates treated\nas infection dates"),
-        (so_y, "SO models", "Transmission timed from\nthe infector's onset"),
+        (
+            serial_interval_based_y,
+            "Serial interval-based\nmodels",
+            "Onset dates treated\nas infection dates",
+        ),
+        (
+            so_y,
+            "Symptom onset-anchored\ntransmission models",
+            "Transmission timed from\nthe infector's onset",
+        ),
     ):
-        ax.text(0, y + 0.3, name, va="center", fontsize=plt.rcParams["axes.titlesize"])
+        ax.text(
+            0,
+            y + 0.12,
+            name,
+            va="bottom",
+            fontsize=plt.rcParams["axes.titlesize"],
+            linespacing=1.15,
+        )
         ax.text(
             0,
             y - 0.02,
@@ -316,14 +332,20 @@ def _plot_onset_anchoring_schematic(*, ax, delay_means):
     for onset in (infector_onset, infectee_onset):
         ax.plot(
             [onset, onset],
-            [so_y, naive_y],
+            [so_y, serial_interval_based_y],
             color=_GUIDE_COLOR,
             linewidth=1.5,
             linestyle=":",
             zorder=0,
         )
     for y, delay_name, label, start, end in (
-        (naive_y, "serial_interval", "Serial interval", infector_onset, infectee_onset),
+        (
+            serial_interval_based_y,
+            "serial_interval",
+            "Serial interval",
+            infector_onset,
+            infectee_onset,
+        ),
         (so_y, "tost", "Onset to transmission", infector_onset, transmission),
         (so_y, "inc_period", "Incubation period", transmission, infectee_onset),
     ):
@@ -345,8 +367,8 @@ def _plot_onset_anchoring_schematic(*, ax, delay_means):
             fontsize=text_size,
         )
     for y, x, label, observed in (
-        (naive_y, infector_onset, "Infector's onset", True),
-        (naive_y, infectee_onset, "Infectee's onset", True),
+        (serial_interval_based_y, infector_onset, "Infector's onset", True),
+        (serial_interval_based_y, infectee_onset, "Infectee's onset", True),
         (so_y, infector_onset, "Infector's onset", True),
         (so_y, transmission, "Infectee's infection\n(unobserved)", False),
         (so_y, infectee_onset, "Infectee's onset", True),
@@ -394,7 +416,7 @@ if __name__ == "__main__":
     argparse.ArgumentParser(
         description=(
             "Plot the reported incidence, with schematics of the superspreading models "
-            "and of the naive and symptom onset-anchored models."
+            "and of the serial interval-based and symptom onset-anchored models."
         )
     ).parse_args()
 

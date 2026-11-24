@@ -38,7 +38,7 @@ def risk_inputs(*, toy_inputs):
         if not model_name.endswith("_so")
     ],
 )
-def test_naive_risk_matches_notes(
+def test_serial_interval_based_risk_matches_notes(
     *, model_name, risk_type, final_day, reporting_prob, risk_inputs
 ):
     reported_incidence_vec = risk_inputs["reported_incidence_vec"][: final_day + 1]
@@ -203,8 +203,8 @@ def test_so_risk_matches_notes(
 @pytest.mark.parametrize("reporting_prob", [1.0, 0.5])
 @pytest.mark.parametrize("model_name", _BRANCHING_MODEL_NAMES)
 def test_risk_orderings(*, model_name, reporting_prob, risk_inputs):
-    # As in the notes, RST <= RAT <= RAC and RST <= RAR <= RAC, with RAT = RAC in naive
-    # models and RAR = RAC under complete reporting
+    # As in the notes, RST <= RAT <= RAC and RST <= RAR <= RAC, with RAT = RAC in serial
+    # interval-based models and RAR = RAC under complete reporting
     reported_incidence_vec = risk_inputs["reported_incidence_vec"][:12]
     posterior, _ = _fake_posterior(
         reported_incidence_vec=reported_incidence_vec,

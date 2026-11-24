@@ -102,11 +102,14 @@ def test_plot_onset_anchoring_schematic():
     _assert_canvas_in_inches(ax=ax)
     # Arrows from left to right: a time axis for each family of models, then the delays
     arrows = [text for text in ax.texts if isinstance(text, matplotlib.text.Annotation)]
-    naive_axis, so_axis, serial_interval, tost, inc_period = (
+    serial_interval_based_axis, so_axis, serial_interval, tost, inc_period = (
         (arrow.xyann[0], arrow.xy[0]) for arrow in arrows
     )
-    assert naive_axis == so_axis
-    assert naive_axis[0] < serial_interval[0] and serial_interval[1] < naive_axis[1]
+    assert serial_interval_based_axis == so_axis
+    assert (
+        serial_interval_based_axis[0] < serial_interval[0]
+        and serial_interval[1] < serial_interval_based_axis[1]
+    )
     # A TOST then an incubation period span the serial interval, each as long as its mean
     assert tost[0] == serial_interval[0]
     assert tost[1] == inc_period[0]
@@ -114,7 +117,7 @@ def test_plot_onset_anchoring_schematic():
     assert tost[1] - tost[0] == pytest.approx(
         0.25 * (serial_interval[1] - serial_interval[0])
     )
-    # The naive models' arrow above the SO models', which are level
+    # The serial interval-based models' arrow above the SO models', which are level
     arrow_ys = [arrow.xy[1] for arrow in arrows[2:]]
     assert arrow_ys[0] > arrow_ys[1] == arrow_ys[2]
     # Each delay labelled in its arrow's colour, which no other delay has
@@ -146,12 +149,12 @@ def test_plot_onset_anchoring_schematic():
         "white",
         "black",
     ]
-    # On their family's time axis, the naive models' above the SO models'
-    naive_axis_y, so_axis_y = (arrow.xy[1] for arrow in arrows[:2])
-    assert naive_axis_y > so_axis_y
+    # On their family's time axis, the serial interval-based models' above the SO models'
+    serial_interval_based_axis_y, so_axis_y = (arrow.xy[1] for arrow in arrows[:2])
+    assert serial_interval_based_axis_y > so_axis_y
     assert [event.get_ydata()[0] for event in events] == [
-        naive_axis_y,
-        naive_axis_y,
+        serial_interval_based_axis_y,
+        serial_interval_based_axis_y,
         so_axis_y,
         so_axis_y,
         so_axis_y,

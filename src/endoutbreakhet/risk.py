@@ -204,7 +204,7 @@ def _ssd_risk_samples(
     serial_interval = delay_distributions["serial_interval"]
     serial_interval_max = serial_interval.max_lag
     # Force of infection on each day after the final day from cases up to the final day
-    # (sums to remaining_inf in the other naive models)
+    # (sums to remaining_inf in the other serial interval-based models)
     remaining_inf_vec_samples = (
         np.pad(total_incidence_vec_samples, ((0, 0), (0, serial_interval_max)))
         @ delay_matrix(
@@ -403,8 +403,9 @@ def _branching_risk_samples(
     # Risk 1 - G^(rem)(z) G^(inc)(z') in a branching model with N^(rem) ~
     # Poisson(R^(fut) Lambda^(rem)) (or NB(R^(fut) Lambda^(rem), k Lambda^(rem)), given
     # remaining_dispersion_per_inf_samples k), N^(inc) ~
-    # Poisson(expected_incubating_samples) (zero in naive models) and offspring
-    # Poisson(R^(fut)) (or NB(R^(fut), k), given offspring_dispersion_samples k), with
+    # Poisson(expected_incubating_samples) (zero in serial interval-based models) and
+    # offspring Poisson(R^(fut)) (or NB(R^(fut), k), given offspring_dispersion_samples k),
+    # with
     # (z, z') = (0, 0), (0, p_0^(off)), (q, q) or (q_rho, q_rho) by risk type, as in the
     # notes
     if risk_type == "cases":

@@ -61,8 +61,8 @@ def test_fixed_prior(*, model_name, toy_inputs_fixed_dispersion):
 @pytest.mark.parametrize("reporting_prob", [1.0, 0.5])
 def test_observed_days(*, model_name, reporting_prob, toy_inputs):
     # Day 0 is imported. If all cases are reported, force of infection/disease is zero from
-    # day 16 (naive) or 17 (SO), so later days are left out. Unreported cases could make it
-    # nonzero on any day
+    # day 16 (serial interval-based) or 17 (SO), so later days are left out. Unreported
+    # cases could make it nonzero on any day
     model = _build_pymc_model(
         model_name=model_name, **toy_inputs, reporting_prob=reporting_prob
     )
@@ -132,9 +132,9 @@ def test_under_reporting_logp(*, model_name, toy_inputs_under_reporting):
     # and unreported counts on each day are independent Poisson, or marginal and
     # conditional negative binomial. The model instead uses the total incidence and
     # binomial reporting. The unreported case on day 12 makes force of infection/disease
-    # nonzero up to day 16 (naive) or 17 (SO), where it is zero from day 16 or 17 from
-    # reported cases alone. In the naive models it is still zero on day 17 (so there are no
-    # cases)
+    # nonzero up to day 16 (serial interval-based) or 17 (SO), where it is zero from day 16
+    # or 17 from reported cases alone. In the serial interval-based models it is still
+    # zero on day 17 (so there are no cases)
     inputs = toy_inputs_under_reporting
     reported_incidence_vec = inputs["reported_incidence_vec"]
     n_days = len(reported_incidence_vec)
@@ -195,8 +195,9 @@ def test_under_reporting_logp(*, model_name, toy_inputs_under_reporting):
 
 
 def test_under_reporting_bridges_gap(*, model_name, toy_inputs):
-    # Force of infection/disease from the day-0 case is zero from day 5 (naive) or 6 (SO),
-    # so the reported case on day 7 needs unreported cases in between, and the data are
+    # Force of infection/disease from the day-0 case is zero from day 5 (serial
+    # interval-based) or 6 (SO), so the reported case on day 7 needs unreported cases in
+    # between, and the data are
     # impossible if all cases are reported. Fitting starts from a point with nonzero
     # density, with an unreported case on each day before day 7
     inputs = toy_inputs | {

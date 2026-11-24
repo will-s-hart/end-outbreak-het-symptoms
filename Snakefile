@@ -81,15 +81,15 @@ numbered_figure_sources = {
             comparison_spec_name=comparison_spec_name
         )[fig_name]
         for figure_number, comparison_spec_name, fig_name in (
-            ("2", "naive_models_fixed_dispersion", "summary"),
-            ("3", "naive_models_estimated_dispersion", "summary"),
-            ("4", "naive_vs_so_fixed_dispersion", "summary"),
-            ("5", "naive_vs_so_80_pc_reporting", "unreported_risk"),
-            ("S2", "naive_vs_so_estimated_dispersion", "summary"),
-            ("S3", "naive_vs_so_80_pc_reporting", "posterior"),
-            ("S4", "naive_vs_so_60_pc_reporting", "summary"),
-            ("S5", "naive_vs_so_fixed_dispersion", "risk_sustained"),
-            ("S6", "naive_vs_so_80_pc_reporting", "risk_cases_reports"),
+            ("2", "serial_interval_based_models_fixed_dispersion", "summary"),
+            ("3", "serial_interval_based_models_estimated_dispersion", "summary"),
+            ("4", "serial_interval_based_vs_so_fixed_dispersion", "summary"),
+            ("5", "serial_interval_based_vs_so_80_pc_reporting", "unreported_risk"),
+            ("S2", "serial_interval_based_vs_so_estimated_dispersion", "summary"),
+            ("S3", "serial_interval_based_vs_so_80_pc_reporting", "posterior"),
+            ("S4", "serial_interval_based_vs_so_60_pc_reporting", "summary"),
+            ("S5", "serial_interval_based_vs_so_fixed_dispersion", "risk_sustained"),
+            ("S6", "serial_interval_based_vs_so_80_pc_reporting", "risk_cases_reports"),
             ("S7", "poisson_vs_superspreading", "summary"),
         )
     },

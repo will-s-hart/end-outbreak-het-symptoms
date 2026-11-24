@@ -73,7 +73,8 @@ _PARAM_LABELS = {
 }
 
 # Public, as are DELAY_COLORS, so figures a script draws itself (such as schematics) match
-# the rest. Each naive model and its SO variant are a dark and a light shade of one hue
+# the rest. Each serial interval-based model and its SO variant are a dark and a light
+# shade of one hue
 MODEL_STYLES = {
     "poisson": {"label": "Poisson", "color": "black"},
     "poisson_so": {"label": "Poisson-SO", "color": _COLORS["gray"]},
@@ -382,7 +383,8 @@ def plot_risk_incidence_overlay(
     # x is in days since the first case, up to the last risk day
     for model_name, risk_df in risk_df_by_model.items():
         model_style = MODEL_STYLES[model_name]
-        # Risks of cases and transmission coincide in the naive models, so they get one curve
+        # Risks of cases and transmission coincide in the serial interval-based models, so
+        # they get one curve
         model_risk_types = (
             tuple(risk_type for risk_type in risk_types if risk_type != "transmission")
             if not model_name.endswith("_so") and "cases" in risk_types

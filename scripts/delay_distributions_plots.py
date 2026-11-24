@@ -25,14 +25,14 @@ def make_plots():
     fig, (serial_interval_ax, inc_period_ax, tost_ax) = make_panel_figure(
         panels_per_row=[3], width=20.7
     )
-    # Serial interval used by the naive models, with that implied by the incubation
-    # period and TOST used by the SO models
+    # Serial interval used by the serial interval-based models, with that implied by the
+    # incubation period and TOST used by the SO models
     plot_delay_distribution(
         ax=serial_interval_ax,
         delay=delay_by_name["serial_interval"],
         delay_name="serial_interval",
         max_lag=inputs["max_plot_lag"],
-        label="Naive models",
+        label="Serial interval-based models",
         overlay=_implied_serial_interval(
             tost=delay_by_name["tost"], inc_period=delay_by_name["inc_period"]
         ),
